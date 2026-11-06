@@ -1,6 +1,52 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 
 export class SourceError extends Error {}
+
+// CXF can return a SOAP envelope as the root MIME part even when no documents were requested.
+export function soapXml(body, contentType = '') {
+  if (!/^multipart\/related(?:\s*;|$)/i.test(contentType)) return body;
+  const parameter = name => {
+    const match = contentType.match(new RegExp(`(?:^|;)\\s*${name}\\s*=\\s*(?:"([^"\\r\\n]*)"|([^;\\s]+))`, 'i'));
+    return match ? match[1] ?? match[2] : '';
+  };
+  const boundary = parameter('boundary');
+  if (!boundary || boundary.length > 200 || /[\r\n]/.test(boundary)) throw new SourceError('Resposta multipart MNI sem delimitador válido.');
+  const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const delimiter = new RegExp(`(?:^|\\r?\\n)--${escaped}(--)?[ \\t]*(?:\\r?\\n|$)`, 'g');
+  const markers = [];
+  for (const match of body.matchAll(delimiter)) {
+    markers.push({ start: match.index, end: match.index + match[0].length, closing: !!match[1] });
+    if (markers.length > 64) throw new SourceError('Resposta multipart MNI com partes demais.');
+  }
+  if (markers.length < 2 || !markers.at(-1).closing) throw new SourceError('Resposta multipart MNI incompleta.');
+  const rootId = parameter('start');
+  for (let i = 0; i < markers.length - 1; i++) {
+    if (markers[i].closing) break;
+    const part = body.slice(markers[i].end, markers[i + 1].start);
+    const separator = /\r?\n\r?\n/.exec(part);
+    if (!separator) continue;
+    const header = part.slice(0, separator.index).replace(/\r?\n[ \t]+/g, ' ');
+    const headers = new Map(header.split(/\r?\n/).map(line => {
+      const colon = line.indexOf(':');
+      return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+    }));
+    if (rootId && headers.get('content-id') !== rootId) continue;
+    if (!rootId && i !== 0) continue;
+    if (!/^(?:text\/xml|application\/(?:xop\+xml|soap\+xml|xml))(?:\s*;|$)/i.test(headers.get('content-type') || '')) {
+      throw new SourceError('Parte principal da resposta MNI não contém XML SOAP.');
+    }
+    const payload = part.slice(separator.index + separator[0].length).trim();
+    const encoding = (headers.get('content-transfer-encoding') || 'binary').toLowerCase();
+    if (['binary', '8bit', '7bit'].includes(encoding)) return payload;
+    if (encoding === 'base64') {
+      try { return new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/\s/g, '')), c => c.charCodeAt(0))); }
+      catch { throw new SourceError('Parte XML MNI contém base64 inválido.'); }
+    }
+    throw new SourceError('Codificação da resposta multipart MNI não suportada.');
+  }
+  throw new SourceError('Parte principal ausente na resposta multipart MNI.');
+}
+
 export const escapeXml = (value) => String(value).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 
 export function envelope(number, connector) {

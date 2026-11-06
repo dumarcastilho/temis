@@ -1,6 +1,6 @@
 import type { Env, ProcessRow } from './env';
 import { connectors, validateEndpoint } from './courts';
-import { envelope, parseMni, SourceError } from './mni.js';
+import { envelope, parseMni, soapXml, SourceError } from './mni.js';
 
 export interface Movement { key: string; date: string; description: string }
 const TJMT = 'https://hellsgate.tjmt.jus.br/consultaprocessual/ProcessosJudiciais';
@@ -74,5 +74,6 @@ export async function querySource(process: ProcessRow, env: Env): Promise<Moveme
     headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"' },
     body: envelope(process.number, connector),
   });
-  return parseMni(await boundedResponse(response), process.number, process.tribunal === 'tjmt' ? '-04:00' : '-03:00');
+  const xml = soapXml(await boundedResponse(response), response.headers.get('content-type') || '');
+  return parseMni(xml, process.number, process.tribunal === 'tjmt' ? '-04:00' : '-03:00');
 }

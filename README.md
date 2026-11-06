@@ -23,12 +23,12 @@ O Temis **não utiliza DataJud**. A consulta precisa estar disponível diretamen
 | Tribunal | Fonte | Situação do conector |
 | --- | --- | --- |
 | TJMT | API utilizada pela [consulta processual oficial](https://consultaprocessual.tjmt.jus.br/) | Implementado para históricos públicos. Seleção por instância e consulta dos registros encontrados, incluindo arquivados. |
-| TJPE | [MNI oficial](https://portal.tjpe.jus.br/web/transparencia/tic/dados-abertos) | Cliente MNI implementado; exige configurar e validar o endpoint e o acesso. |
+| TJPE | [MNI oficial](https://portal.tjpe.jus.br/web/transparencia/tic/dados-abertos) | 1º grau com conector público embutido, incluindo respostas SOAP multipart/MTOM. 2º grau exige configurar e validar o endpoint e o acesso. |
 | TJBA | [MNI oficial](https://www.tjba.jus.br/portal/web-service/) | Cliente MNI implementado; exige configurar e validar o endpoint e o acesso. |
 | TJRN | PJe | Cadastro disponível; integração direta ainda depende de endpoint/acesso e validação. |
 | TJGO | [Projudi / PJD](https://projudi.tjgo.jus.br/BuscaProcesso) | Cadastro disponível; conector específico ainda precisa ser implementado ou homologado via MNI compatível. |
 
-A tela **Tribunais** diferencia conectores configurados de integrações pendentes. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML, movimentos nacionais/locais e credenciais opcionais no envelope; adaptações de contrato podem ser necessárias em cada instalação.
+A tela **Tribunais** diferencia conectores configurados de integrações pendentes. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML simples ou envelope XML em multipart/related (MTOM), movimentos nacionais/locais e credenciais opcionais no envelope. Anexos MIME são ignorados e partes incompletas ou não reconhecidas são rejeitadas; adaptações de contrato podem ser necessárias em cada instalação.
 
 O número CNJ identifica o tribunal, mas não necessariamente a instância atual. Cadastre 1º e 2º graus separadamente quando necessário. O produto atualmente trabalha com processos e movimentações públicos. Não baixa documentos, não abre intimações e não contorna CAPTCHA, MFA ou restrições do tribunal. Regras de acesso por IP fixo ou certificado cliente exigem infraestrutura e implementação adicional.
 
@@ -53,7 +53,7 @@ pnpm dev --var LOCAL_DEV:true
 
 Abra `http://localhost:8787`. O acesso de desenvolvimento só funciona em loopback (`localhost`, `127.0.0.1`, `::1`) e representa `developer@example.invalid`. Não defina `LOCAL_DEV` no ambiente remoto. Sem esse parâmetro, a aplicação exige Cloudflare Access também localmente.
 
-O estado local fica em `.wrangler/`, fora do versionamento. Sem conectores configurados, cadastros dos demais tribunais ficam como integração pendente. O TJMT possui conector público embutido.
+O estado local fica em `.wrangler/`, fora do versionamento. Sem conectores adicionais configurados, cadastros dos demais tribunais ficam como integração pendente. O TJMT e o TJPE de 1º grau possuem conectores públicos embutidos.
 
 ```sh
 pnpm test
@@ -113,7 +113,7 @@ Todos os usuários liberados compartilham a mesma carteira e podem editar ou exc
 
 ### 3. Conectores MNI
 
-O TJMT funciona sem esse segredo. Para outros tribunais, use `COURT_CONNECTORS` como segredo JSON, com uma chave por tribunal e grau. Exemplo com endereço fictício:
+O TJMT e o TJPE de 1º grau funcionam sem esse segredo. Para configurar outros serviços ou substituir o endpoint MNI padrão, use `COURT_CONNECTORS` como segredo JSON, com uma chave por tribunal e grau. Exemplo com endereço fictício:
 
 ```json
 {

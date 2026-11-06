@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMni, envelope } from '../src/mni.js';
+import { parseMni, envelope, soapXml } from '../src/mni.js';
 
 const number = '99999990020998119999';
 const xml = (movements='',success='true',n=number) => `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><r:consultarProcessoResposta xmlns:r="urn:test"><sucesso>${success}</sucesso><processo><dadosBasicos numero="${n}"/>${movements}</processo></r:consultarProcessoResposta></s:Body></s:Envelope>`;
@@ -27,4 +27,24 @@ test('envelope escapes credentials and requests header without document contents
   assert.ok(body.includes('u&lt;&amp;'));assert.ok(body.includes('p&quot;&lt;'));
   assert.ok(body.includes('<tip:movimentos>true</tip:movimentos>'));
   assert.ok(!body.includes('incluirDocumentos'));
+});
+
+test('reads the XML root from an MTOM multipart response without treating MIME headers as XML', () => {
+  const boundary = 'synthetic.+boundary';
+  const body = `--${boundary}\r\nContent-Type: application/octet-stream\r\nContent-ID: <attachment>\r\n\r\nIgnored attachment\r\n--${boundary}\r\nContent-Type: application/xop+xml; charset=UTF-8; type="text/xml"\r\nContent-Transfer-Encoding: binary\r\nContent-ID: <soap-root>\r\n\r\n${xml()}\r\n--${boundary}--\r\n`;
+  const contentType = `multipart/related; boundary="${boundary}"; start="<soap-root>"; type="application/xop+xml"`;
+  assert.equal(soapXml(body, contentType), xml());
+  assert.deepEqual(parseMni(soapXml(body, contentType), number), []);
+  assert.equal(soapXml(xml(), 'text/xml'), xml());
+});
+
+test('supports a base64 XML root and refuses missing, incomplete or unsupported MIME parts', () => {
+  const contentType = 'multipart/related; boundary=synthetic';
+  const body = `--synthetic\nContent-Type: text/xml\nContent-Transfer-Encoding: base64\n\n${Buffer.from(xml()).toString('base64')}\n--synthetic--\n`;
+  assert.equal(soapXml(body, contentType), xml());
+  assert.throws(() => soapXml(body, 'multipart/related'), /delimitador/);
+  assert.throws(() => soapXml(body.replace('--synthetic--', ''), contentType), /incompleta/);
+  assert.throws(() => soapXml(body, contentType + '; start="<missing>"'), /ausente/);
+  assert.throws(() => soapXml(body.replace('Content-Type: text/xml', 'Content-Type: application/octet-stream'), contentType), /não contém XML/);
+  assert.throws(() => soapXml(body.replace('base64', 'quoted-printable'), contentType), /não suportada/);
 });

@@ -64,6 +64,24 @@ Os testes usam números e movimentos sintéticos, verificam autenticação, prot
 
 ## Implantação na Cloudflare
 
+### Workers Builds conectado ao GitHub
+
+O `database_id` com zeros em `wrangler.jsonc` é um marcador para desenvolvimento, não um banco remoto. No deploy pelo GitHub, use o comando abaixo para receber o ID real pelas variáveis de build sem publicar a configuração da conta no repositório.
+
+1. Crie um banco chamado `temis` em **Storage & databases → D1** no painel Cloudflare, ou escolha um banco existente destinado ao Temis. Copie seu **Database ID** (UUID, diferente do Account ID).
+2. Em **Workers & Pages → seu Worker → Settings → Build**, configure os comandos:
+   - **Build command:** `pnpm run build`
+   - **Deploy command:** `pnpm run deploy:ci`
+3. Nas **variáveis e segredos do build**, defina `TEMIS_D1_DATABASE_ID` com o UUID real do D1. Essa variável é usada pelo processo de implantação, não pelo navegador.
+4. Configure o domínio personalizado do Worker e o Cloudflare Access conforme a seção abaixo. As variáveis `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` e `APP_ORIGIN` podem ser informadas no build ou nas variáveis de execução do Worker. Exemplo de origem: `https://temis.example.com`, sem barra final. Use o domínio da sua aplicação.
+5. Execute um novo build com a versão atualizada do repositório.
+
+`deploy:ci` gera uma configuração temporária ignorada pelo Git, valida o UUID, aplica as migrações no D1 e só então publica o Worker. Se as migrações falharem, o deploy é interrompido. O processo não cria o banco automaticamente: o banco indicado precisa existir na mesma conta e o token de build precisa permitir acesso ao D1 e publicação do Worker.
+
+Os valores de execução definidos no painel são preservados quando não forem fornecidos pelo build. Valores definidos no build têm precedência para as quatro variáveis de execução suportadas (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `APP_ORIGIN`, `CHECK_INTERVAL_MINUTES`). Segredos de conectores não são copiados para o arquivo temporário.
+
+Não use `npx wrangler deploy` diretamente com o arquivo de exemplo sem substituir seu marcador por uma configuração local válida. A ausência de configuração do Cloudflare Access bloqueia o acesso com HTTP 503; ela não abre o site ao público. Configure os e-mails permitidos e o hostname em Access antes de utilizar a aplicação.
+
 ### 1. Banco e configuração do Worker
 
 ```sh

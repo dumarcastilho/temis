@@ -6,6 +6,7 @@ dist/
 .env.*
 !.env.example
 wrangler.local.jsonc
+wrangler.build.jsonc
 *.sqlite*
 *.db
 *.log

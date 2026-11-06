@@ -2,6 +2,7 @@ node_modules/
 .wrangler/
 dist/
 .dev.vars
+.dev.vars.*
 .env
 .env.*
 !.env.example
@@ -9,7 +10,13 @@ wrangler.local.jsonc
 wrangler.build.jsonc
 *.sqlite*
 *.db
+*.db-*
 *.log
+*.bak
+*.dump
+backup*.sql
+*-backup.sql
+backups/
 .DS_Store
 coverage/
 playwright-report/

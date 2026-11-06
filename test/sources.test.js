@@ -30,7 +30,8 @@ test('TJMT and MNI reject redirects without following them or sending credential
   try {
     await assert.rejects(queryTjmt(number, '1g'), /redirecionou/);
     const process = { number, tribunal: 'tjpe', instance: '1g' };
-    const env = { COURT_CONNECTORS: JSON.stringify({ 'tjpe:1g': { endpoint: 'https://integracao.example.jus.br/mni', username: 'synthetic', password: 'synthetic' } }) };
+    // Official endpoint shape; global fetch is mocked, so no tribunal receives this test request.
+    const env = { COURT_CONNECTORS: JSON.stringify({ 'tjpe:1g': { endpoint: 'https://pjemni.app.tjpe.jus.br/1g/servico-intercomunicacao-2.2.2', username: 'synthetic', password: 'synthetic' } }) };
     await assert.rejects(querySource(process, env), /redirecionou/);
     assert.equal(calls, 2);
   } finally { globalThis.fetch = original; }

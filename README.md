@@ -118,14 +118,14 @@ O TJMT funciona sem esse segredo. Para outros tribunais, use `COURT_CONNECTORS` 
 ```json
 {
   "tjpe:1g": {
-    "endpoint": "https://integracao.example.jus.br/servico-intercomunicacao-2.2.2",
+    "endpoint": "https://integracao.example.invalid/servico-intercomunicacao-2.2.2",
     "username": "IDENTIFICADOR_AUTORIZADO",
     "password": "SENHA_DO_SERVICO"
   }
 }
 ```
 
-O exemplo de endpoint é ilustrativo. Obtenha o endereço real e as condições de acesso diretamente com o tribunal. Os endpoints publicados pelo TJPE e TJBA estão nas referências da tabela de cobertura. Use a URL do serviço **sem `?wsdl`**. Omita usuário e senha somente se o serviço aceitar consulta anônima. Não coloque credenciais no repositório, no navegador, nos logs ou nas observações do processo.
+O domínio reservado `example.invalid` é apenas ilustrativo e será rejeitado pela validação do conector. Substitua-o pelo endpoint HTTPS oficial em domínio `.jus.br`, obtido diretamente com o tribunal junto com as condições de acesso. Os endpoints publicados pelo TJPE e TJBA estão nas referências da tabela de cobertura. Use a URL do serviço **sem `?wsdl`**. Omita usuário e senha somente se o serviço aceitar consulta anônima. Não coloque credenciais no repositório, no navegador, nos logs ou nas observações do processo.
 
 ```sh
 pnpm exec wrangler secret put COURT_CONNECTORS --config wrangler.local.jsonc
@@ -154,7 +154,7 @@ Depois da implantação, valide o redirecionamento ao login em sessão anônima,
 - Processos excluídos removem histórico e notificações em cascata. Exporte o banco antes de alterações importantes.
 
 ```sh
-pnpm exec wrangler d1 export temis --remote --output backup.sql --config wrangler.local.jsonc
+pnpm exec wrangler d1 export temis --remote --output ../temis-backup.sql --config wrangler.local.jsonc
 ```
 
 Guarde exportações em local privado e fora do checkout. Se precisar voltar o código, use as versões/deployments do Workers. Restaurar o código não restaura o banco: avalie a compatibilidade das migrações antes do rollback. Consulte [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) para recuperação do banco conforme a retenção da conta.
@@ -165,4 +165,4 @@ Para adicionar tribunais, atualize `src/courts.ts`, o mapeamento CNJ se necessá
 
 Use segredos do Workers para credenciais, restrinja a carteira à equipe necessária e mantenha exportações privadas. O banco contém números de processos, anotações e identidades de usuários; gerencie retenção e acesso conforme a necessidade da equipe.
 
-Copyright © 2026 Dumar Castilho. Todos os direitos reservados. Nenhuma licença de redistribuição foi concedida neste repositório. As dependências mantêm suas próprias licenças.
+Licenciado sob a [licença MIT](LICENSE). Copyright © 2026 Dumar Castilho. As dependências mantêm suas próprias licenças e atribuições; a licença deste projeto não substitui os termos de terceiros.

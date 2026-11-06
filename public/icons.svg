@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<symbol id="temis" viewBox="0 0 32 32"><path d="M16 6v21M8 27h16M6 11l10-4 10 4M8 11l-4 9h8l-4-9Zm16 0-4 9h8l-4-9Z"/><path d="M4 20c1 4 7 4 8 0m8 0c1 4 7 4 8 0"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24"><rect x="5" y="3" width="15" height="17" rx="2"/><path d="M5 7H3v14a1 1 0 0 0 1 1h12M9 8h7M9 12h7M9 16h4"/></symbol>
+<symbol id="bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+<symbol id="court" viewBox="0 0 24 24"><path d="m3 8 9-5 9 5H3ZM5 11v7m5-7v7m4-7v7m5-7v7M3 21h18"/></symbol>
+<symbol id="shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M5.5 7a7.5 7.5 0 0 1 12-1L20 9M4 15l2.5 3a7.5 7.5 0 0 0 12-1"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+<symbol id="radar" viewBox="0 0 24 24"><path d="M19 5A9 9 0 1 0 21 12M12 12l8-8"/><circle cx="12" cy="12" r="4"/></symbol>
+<symbol id="activity" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+<symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></symbol>
+</svg>

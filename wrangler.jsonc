@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "temis",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-05",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [{ "binding": "DB", "database_name": "temis", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "APP_ORIGIN": "",
+    "CHECK_INTERVAL_MINUTES": "120"
+  }
+}

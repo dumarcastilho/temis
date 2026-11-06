@@ -1,0 +1,15 @@
+node_modules/
+.wrangler/
+dist/
+.dev.vars
+.env
+.env.*
+!.env.example
+wrangler.local.jsonc
+*.sqlite*
+*.db
+*.log
+.DS_Store
+coverage/
+playwright-report/
+test-results/

@@ -1,5 +1,5 @@
 import type { Env, ProcessRow } from './env';
-import { querySource } from './sources';
+import { queryProcess } from './sources';
 import { SourceError } from './mni.js';
 
 const hash = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))), b => b.toString(16).padStart(2, '0')).join('');
@@ -13,7 +13,7 @@ export async function checkProcess(env: Env, id: string, manual = false) {
   const interval = Math.max(15, Math.min(1440, Number(env.CHECK_INTERVAL_MINUTES) || 120)) * 60000;
   let stage = 'query_source';
   try {
-    const movements = await querySource(row, env);
+    const { movements, locality } = await queryProcess(row, env);
     // Resolve identities before making any writes: an invalid response never creates a partial baseline.
     stage = 'prepare_history';
     const prepared = await Promise.all(movements.map(async m => ({ ...m, id: await hash(row.id + ':' + m.key) })));
@@ -34,8 +34,9 @@ export async function checkProcess(env: Env, id: string, manual = false) {
       for (let i = 0; i < results.length; i += row.initialized ? 2 : 1) added += results[i].meta.changes;
     }
     stage = 'complete_check';
-    await env.DB.prepare(`UPDATE processes SET initialized=1,checked_at=?,last_error=NULL,next_check_at=?,lease_until=0,lease_token=NULL WHERE id=? AND lease_token=?`)
-      .bind(new Date().toISOString(), now + interval, id, token).run();
+    // Check the current stored value so a manual edit made while fetching is preserved.
+    await env.DB.prepare(`UPDATE processes SET initialized=1,checked_at=?,last_error=NULL,next_check_at=?,lease_until=0,lease_token=NULL,locality=CASE WHEN trim(locality)='' AND ?<>'' THEN ? ELSE locality END WHERE id=? AND lease_token=?`)
+      .bind(new Date().toISOString(), now + interval, locality, locality, id, token).run();
     return { status: 'ok', added: row.initialized ? added : 0 };
   } catch (error) {
     console.error('process_check_failed', { stage, tribunal: row.tribunal, error_name: error instanceof Error ? error.name : 'UnknownError' });

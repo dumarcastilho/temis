@@ -66,7 +66,7 @@ export function mniDate(value) {
 }
 
 const list = value => value == null ? [] : Array.isArray(value) ? value : [value];
-export function parseMni(xml, number, offset = '-03:00') {
+export function parseMniProcess(xml, number, offset = '-03:00') {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml) || XMLValidator.validate(xml) !== true) throw new SourceError('Resposta XML inválida do tribunal.');
   const parsed = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseTagValue: false, parseAttributeValue: false }).parse(xml);
   const body = parsed.Envelope?.Body;
@@ -75,7 +75,7 @@ export function parseMni(xml, number, offset = '-03:00') {
   if (!result || !['true', '1'].includes(String(result.sucesso))) throw new SourceError('Consulta não autorizada ou processo não localizado pelo tribunal.');
   const process = result.processo;
   if (!process || String(process.dadosBasicos?.['@_numero']).replace(/\D/g, '') !== number) throw new SourceError('O tribunal não retornou o processo solicitado.');
-  return list(process.movimento).filter(m => !Number(m['@_nivelSigilo'] || 0)).map(m => {
+  const movements = list(process.movimento).filter(m => !Number(m['@_nivelSigilo'] || 0)).map(m => {
     const rawDate = mniDate(m['@_dataHora']);
     const date = /(?:Z|[+-]\d{2}:\d{2})$/.test(rawDate) ? rawDate : rawDate + offset;
     if (!Number.isFinite(Date.parse(date))) throw new SourceError('Data inválida na resposta do tribunal.');
@@ -87,4 +87,10 @@ export function parseMni(xml, number, offset = '-03:00') {
     if (!description) throw new SourceError('Movimentação sem descrição ou código.');
     return { key: JSON.stringify([m['@_identificadorMovimento'] || '', date, code, description]), date: new Date(date).toISOString(), description: description.slice(0, 4000) };
   });
+  const rawCode = String(process.dadosBasicos?.orgaoJulgador?.['@_codigoMunicipioIBGE'] || '');
+  return { movements, municipalityCode: /^\d{7}$/.test(rawCode) ? rawCode : '' };
+}
+
+export function parseMni(xml, number, offset = '-03:00') {
+  return parseMniProcess(xml, number, offset).movements;
 }

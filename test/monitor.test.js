@@ -12,7 +12,7 @@ function database() {
   const prepare=sql=>({bind(...args){return {async first(){return db.prepare(sql).get(...args)||null;},async all(){return {results:db.prepare(sql).all(...args)};},async run(){const r=db.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}};}};}});
   return {db, binding:{prepare,async batch(statements){db.exec('BEGIN');try{const result=[];for(const s of statements)result.push(await s.run());db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}}};
 }
-const schema=await readFile(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8');
+const schema=(await readFile(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8')) + '\n' + (await readFile(new URL('../migrations/0002_process_locality.sql',import.meta.url),'utf8'));
 function fixture() {
   const {db,binding}=database(); db.exec(schema);
   db.prepare('INSERT INTO processes(id,number,tribunal,instance,created_by) VALUES (?,?,?,?,?)').run('synthetic-process',number,'tjmt','1g','one@example.invalid');
@@ -70,4 +70,32 @@ test('legacy TJMT movements with a missing description preserve their type',asyn
     assert.equal((await checkProcess(env,'synthetic-process')).status,'ok');
     assert.equal(db.prepare('SELECT description FROM movements').get().description,'Movimento legado sintético');
   }finally{globalThis.fetch=original;db.close();}
+});
+
+test('consultation fills an empty locality and preserves a manual edit made while fetching', async () => {
+  const { db, env } = fixture(), original = globalThis.fetch;
+  const originalSource = source([event(1, 'Movimento sintético')]);
+  try {
+    globalThis.fetch = async url => {
+      const response = await originalSource(url);
+      const data = await response.json();
+      if (Array.isArray(data.eventos)) data.jurisdicao = { nome: 'Comarca automática' };
+      return Response.json(data);
+    };
+    assert.equal((await checkProcess(env, 'synthetic-process')).status, 'ok');
+    assert.equal(db.prepare('SELECT locality FROM processes').get().locality, 'Comarca automática');
+    db.exec("UPDATE processes SET next_check_at=0,locality='Comarca manual'");
+    await checkProcess(env, 'synthetic-process');
+    assert.equal(db.prepare('SELECT locality FROM processes').get().locality, 'Comarca manual');
+    db.exec("UPDATE processes SET next_check_at=0,locality=''");
+    const fetchSource = globalThis.fetch;
+    globalThis.fetch = async url => {
+      const response = await fetchSource(url);
+      if (!String(url).includes('/v2?')) db.exec("UPDATE processes SET locality='Edição durante a consulta'");
+      return response;
+    };
+    await checkProcess(env, 'synthetic-process');
+    assert.equal(db.prepare('SELECT locality FROM processes').get().locality, 'Edição durante a consulta');
+    assert.equal(db.prepare('SELECT count(*) n FROM notifications').get().n, 0);
+  } finally { globalThis.fetch = original; db.close(); }
 });

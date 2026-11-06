@@ -68,7 +68,9 @@ Os testes usam números e movimentos sintéticos, verificam autenticação, prot
 
 Na carteira, alterne entre **Acompanhamento** e **Lista simples**. A lista simples reúne os processos cadastrados, inclusive os pausados ou com integração pendente, com UF, comarca/localidade, número CNJ e identificação. Os filtros de busca e tribunal continuam disponíveis; o filtro de status aplica-se apenas ao acompanhamento.
 
-Preencha **Comarca / localidade** ao adicionar ou editar um processo. Esse campo é informado pela equipe e não é inferido pelo número CNJ. Os cadastros existentes continuam disponíveis e aparecem como **Comarca não informada** até receberem esse dado.
+O campo **Comarca / localidade** é opcional. Quando estiver vazio, uma consulta bem-sucedida tenta preenchê-lo com os metadados oficiais do processo: jurisdição/localidade no TJMT ou município do órgão julgador no MNI. No MNI, o código de município retornado pelo tribunal é convertido em nome pela [API de localidades do IBGE](https://servicodados.ibge.gov.br/api/docs/localidades); somente esse código é enviado ao IBGE, sem número do processo ou dados das partes. Se faltar essa informação ou o serviço de localidades estiver indisponível, o histórico continua sendo salvo e o campo permanece disponível para edição manual.
+
+Valores já preenchidos são preservados, inclusive se forem editados durante a consulta. Cadastros antigos com o campo vazio podem receber a informação na próxima consulta automática ou em **Acompanhamento → Consultar tribunal**. A comarca não é deduzida apenas pelo número CNJ. Uma mudança somente na comarca não gera aviso de movimentação.
 
 Use **Copiar lista** para copiar os processos exibidos, respeitando os filtros, em blocos com UF, comarca e número. Entradas de 2º grau incluem a instância para distingui-las. O texto copiado não inclui andamentos, erros de consulta, identificação interna nem observações. Se o navegador impedir a cópia automática, o texto fica disponível para seleção manual.
 

@@ -1,5 +1,5 @@
 import { bindCnjMask } from './cnj-mask.js';
-import { processState, sortProcessList, processListText } from './process-list.js';
+import { processState, sortProcessList, processListText, formatLocality } from './process-list.js';
 const $ = selector => document.querySelector(selector);
 const state = { processes: [], visibleProcesses: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes', processView: 'tracking' };
 try { if (localStorage.getItem('temis.processView') === 'simple') state.processView = 'simple'; } catch {}
@@ -48,7 +48,7 @@ function render() {
   $('#empty-add').hidden = !!state.processes.length;
   $('#empty-state p').textContent = state.processes.length ? 'Tente outro número, comarca ou tribunal.' : simple ? 'Adicione seus processos para organizar a lista por estado e comarca.' : 'Adicione um número de processo para organizar o histórico e acompanhar novas movimentações.';
   if (simple) {
-    $('#process-list').innerHTML = rows.map(p => `<tr><td><span class="court-tag">${esc(processState(p))}</span></td><td class="simple-locality">${esc(p.locality || 'Comarca não informada')}</td><td><span class="simple-process-number">${esc(format(p.number))}</span><span class="process-label">${esc(p.label || '')}${p.label ? ' · ' : ''}${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><button class="button secondary simple-edit" data-edit="${p.id}" aria-label="Editar ${esc(format(p.number))}">Editar</button></td></tr>`).join('');
+    $('#process-list').innerHTML = rows.map(p => `<tr><td><span class="court-tag">${esc(processState(p))}</span></td><td class="simple-locality">${esc(formatLocality(p.locality) || 'Comarca não informada')}</td><td><span class="simple-process-number">${esc(format(p.number))}</span><span class="process-label">${esc(p.label || '')}${p.label ? ' · ' : ''}${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><button class="button secondary simple-edit" data-edit="${p.id}" aria-label="Editar ${esc(format(p.number))}">Editar</button></td></tr>`).join('');
     return;
   }
   $('#process-list').innerHTML = rows.map(p => {
@@ -70,7 +70,7 @@ function openForm(process) {
   $('#number').value = process ? format(process.number) : ''; $('#number').disabled = !!process;
   $('#instance').value = process?.instance || '1g'; $('#instance').disabled = !!process;
   $('#label').value = process?.label || ''; $('#notes').value = process?.notes || '';
-  $('#locality').value = process?.locality || '';
+  $('#locality').value = formatLocality(process?.locality);
   $('#process-dialog').showModal();
 }
 async function showDetail(id) {

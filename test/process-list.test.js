@@ -1,11 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { processListText, sortProcessList } from '../public/process-list.js';
+import { processListText, sortProcessList, formatLocality } from '../public/process-list.js';
 
 const rows = [
   { number: '99999990020998209999', tribunal: 'tjrn', locality: 'Comarca B', instance: '1g', active: 0, last_error: 'Erro que não deve constar na lista', latest_movement: 'Andamento que não deve constar na lista' },
   { number: '99999990020998059999', tribunal: 'tjba', locality: 'Comarca A', instance: '1g', label: 'Identificação interna', notes: 'Anotação privada' },
 ];
+
+test('locality names keep accents and Portuguese connectors in display and copied lists', () => {
+  for (const [input, expected] of [
+    ['VÁRZEA GRANDE', 'Várzea Grande'],
+    ['SÃO BENTO DO NORTE', 'São Bento do Norte'],
+    ['  olinda  ', 'Olinda'],
+    ['LAGOA D’ANTA', 'Lagoa D’Anta'],
+    ['SANTA BÁRBARA D\'OESTE', 'Santa Bárbara D\'Oeste'],
+    ['SÃO JOÃO DA BOA VISTA', 'São João da Boa Vista'],
+    ['', ''],
+    [undefined, ''],
+  ]) assert.equal(formatLocality(input), expected);
+  assert.ok(processListText([{ ...rows[0], locality: 'SÃO BENTO DO NORTE' }]).includes('São Bento do Norte'));
+});
 
 test('simple list sorts a copy by state and locality, keeping paused cases and excluding progress and private notes from copied text', () => {
   const sorted = sortProcessList(rows);

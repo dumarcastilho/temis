@@ -75,9 +75,16 @@ export function parseMniProcess(xml, number, offset = '-03:00') {
   if (!result || !['true', '1'].includes(String(result.sucesso))) throw new SourceError('Consulta não autorizada ou processo não localizado pelo tribunal.');
   const process = result.processo;
   if (!process || String(process.dadosBasicos?.['@_numero']).replace(/\D/g, '') !== number) throw new SourceError('O tribunal não retornou o processo solicitado.');
+  const rawCode = String(process.dadosBasicos?.orgaoJulgador?.['@_codigoMunicipioIBGE'] || '');
+  const municipalityCode = /^\d{7}$/.test(rawCode) ? rawCode : '';
+  const stateCode = municipalityCode.slice(0, 2);
+  const knownState = ['11','12','13','14','15','16','17','21','22','23','24','25','26','27','28','29','31','32','33','35','41','42','43','50','51','52','53'].includes(stateCode);
+  const effectiveOffset = knownState ? ({ '12': '-05:00', '11': '-04:00', '13': '-04:00', '14': '-04:00', '50': '-04:00', '51': '-04:00' }[stateCode] || '-03:00') : offset;
   const movements = list(process.movimento).filter(m => !Number(m['@_nivelSigilo'] || 0)).map(m => {
     const rawDate = mniDate(m['@_dataHora']);
-    const date = /(?:Z|[+-]\d{2}:\d{2})$/.test(rawDate) ? rawDate : rawDate + offset;
+    const hasOffset = /(?:Z|[+-]\d{2}:\d{2})$/.test(rawDate);
+    if (!hasOffset && effectiveOffset === 'auto') throw new SourceError('O tribunal não informou o município ou fuso necessário para interpretar as datas deste processo.');
+    const date = hasOffset ? rawDate : rawDate + effectiveOffset;
     if (!Number.isFinite(Date.parse(date))) throw new SourceError('Data inválida na resposta do tribunal.');
     const national = m.movimentoNacional;
     const local = m.movimentoLocal;
@@ -87,8 +94,7 @@ export function parseMniProcess(xml, number, offset = '-03:00') {
     if (!description) throw new SourceError('Movimentação sem descrição ou código.');
     return { key: JSON.stringify([m['@_identificadorMovimento'] || '', date, code, description]), date: new Date(date).toISOString(), description: description.slice(0, 4000) };
   });
-  const rawCode = String(process.dadosBasicos?.orgaoJulgador?.['@_codigoMunicipioIBGE'] || '');
-  return { movements, municipalityCode: /^\d{7}$/.test(rawCode) ? rawCode : '' };
+  return { movements, municipalityCode };
 }
 
 export function parseMni(xml, number, offset = '-03:00') {

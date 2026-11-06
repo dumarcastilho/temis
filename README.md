@@ -10,7 +10,9 @@ Acompanhamento privado de processos judiciais em Cloudflare Workers, com banco C
 - Máscara CNJ durante a digitação e colagem, com preservação de zeros iniciais e teclado numérico no celular.
 - Carteira compartilhada entre os usuários autorizados no Cloudflare Access.
 - Filtros por tribunal, identificação, status e avisos não lidos.
-- Lista simples dos processos cadastrados, organizada por UF e comarca, sem andamentos, com cópia em texto para compartilhamento.
+- Acompanhamento ordenado por prioridade: atenção e integração pendente, primeira consulta pendente, em acompanhamento e pausados; a ordem anterior é preservada dentro de cada grupo.
+- Catálogo nacional com 27 TJs, 6 TRFs e 24 TRTs, identificação pelo CNJ e busca de tribunais por ramo e disponibilidade.
+- Lista simples dos processos cadastrados, organizada por UF ou região e comarca, sem andamentos, com cópia em texto para compartilhamento.
 - Consulta direta ao tribunal, histórico paginado e primeira consulta usada como referência inicial.
 - Notificações para movimentos encontrados após o histórico inicial, com leitura individual por usuário.
 - Pausa, retomada, edição e exclusão do acompanhamento.
@@ -21,6 +23,10 @@ Acompanhamento privado de processos judiciais em Cloudflare Workers, com banco C
 
 O Temis **não utiliza DataJud**. A consulta precisa estar disponível diretamente no tribunal.
 
+O cadastro aceita os 57 tribunais da Justiça Estadual (incluindo TJDFT), Federal e do Trabalho, com prioridade para o 1º grau. **Presença no catálogo não significa integração automática concluída.** Sem um serviço compatível e acesso autorizado, o processo pode ser cadastrado e organizado, mas permanece com integração pendente. Justiça Eleitoral, Militar e tribunais superiores não fazem parte desse catálogo.
+
+A identificação por TRF representa a região da Justiça Federal de origem. Os serviços de 1º grau podem ser separados por seção judiciária; não se deve usar um endpoint de 2º grau para todos os processos federais.
+
 | Tribunal | Fonte | Situação do conector |
 | --- | --- | --- |
 | TJMT | API utilizada pela [consulta processual oficial](https://consultaprocessual.tjmt.jus.br/) | Implementado para históricos públicos. Seleção por instância e consulta dos registros encontrados, incluindo arquivados. |
@@ -28,8 +34,11 @@ O Temis **não utiliza DataJud**. A consulta precisa estar disponível diretamen
 | TJBA | [MNI oficial](https://www.tjba.jus.br/portal/web-service/) | Endpoint oficial de 1º grau embutido. O acesso e a resposta de um processo real ainda precisam ser validados; pode exigir credenciais ou liberação pelo tribunal. 2º grau permanece pendente. |
 | TJRN | PJe | Cadastro disponível; integração direta ainda depende de endpoint/acesso e validação. |
 | TJGO | [Serviços públicos do Projudi](https://transparencia.tjgo.jus.br/ti-comunicacoes/acesso-automatizado) | Conector de 1º grau implementado conforme o contrato XML oficial; validação com processo real pendente. 2º grau permanece pendente. |
+| TJPI, TJES, TJAM (SAJ) | Contratos oficiais: [TJPI](https://pje.tjpi.jus.br/1g/intercomunicacao?wsdl), [TJES](https://pje.tjes.jus.br/pje/intercomunicacao?wsdl), [TJAM](https://www.tjam.jus.br/index.php/dados-abertos) | Perfis MNI de 1º grau embutidos, desativados até configuração explícita de acesso. Sem consulta real validada; não cobrem automaticamente outros sistemas do mesmo tribunal. |
+| TRF1, TRT6, TRT15 | [TRF1](https://www.trf1.jus.br/trf1/conteudo/NUGTI/MNI_Orienta%C3%A7%C3%B5es.pdf), [TRT6](https://www.trt6.jus.br/portal/transparencia/dados-abertos), [TRT15](https://trt15.jus.br/transparencia/dados-abertos) | Perfis MNI de 1º grau embutidos, desativados até configuração explícita. Exigem validar as permissões e o contrato com credenciais autorizadas; TRT6 e TRT15 informam exigência de credenciamento ou convênio. |
+| Demais TJs, TRFs e TRTs | Portal oficial de cada tribunal na tela **Tribunais e integrações** | Cadastro e configuração MNI 2.2.2 disponíveis. Endpoint, acesso e compatibilidade precisam ser confirmados; sistemas ou versões diferentes podem exigir adaptadores ainda não implementados. |
 
-A tela **Tribunais** distingue configuração pendente, primeira consulta pendente, consulta confirmada e falha de acesso. A confirmação depende de um processo com histórico consultado com sucesso e sem erro registrado na carteira. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML simples ou envelope XML em multipart/related (MTOM), movimentos nacionais/locais e credenciais opcionais no envelope. Anexos MIME são ignorados e partes incompletas ou não reconhecidas são rejeitadas; adaptações de contrato podem ser necessárias em cada instalação.
+A tela **Tribunais** distingue configuração ou credenciamento pendente, primeira consulta pendente, consulta confirmada e falha de acesso. A confirmação depende de um processo com histórico consultado com sucesso e sem erro registrado na carteira. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML simples ou envelope XML em multipart/related (MTOM), movimentos nacionais/locais e credenciais opcionais no envelope. Anexos MIME são ignorados e partes incompletas ou não reconhecidas são rejeitadas; adaptações de contrato podem ser necessárias em cada instalação.
 
 O número CNJ identifica o tribunal, mas não necessariamente a instância atual. Cadastre 1º e 2º graus separadamente quando necessário. O produto atualmente trabalha com processos e movimentações públicos. Não baixa documentos, não abre intimações e não contorna CAPTCHA, MFA ou restrições do tribunal. Regras de acesso por IP fixo ou certificado cliente exigem infraestrutura e implementação adicional.
 
@@ -124,7 +133,22 @@ Todos os usuários liberados compartilham a mesma carteira e podem editar ou exc
 
 ### 3. Conectores MNI
 
-A prioridade de integração é o 1º grau. O TJRN permanece pendente até que o tribunal confirme um endpoint MNI acessível e as condições de acesso; uma URL de consulta pública no navegador não substitui esse serviço. Configure `tjrn:1g` apenas com o endereço autorizado fornecido pelo tribunal. Não use URLs antigas ou de outro segmento da Justiça.
+A prioridade de integração é o 1º grau. As chaves de configuração aceitam os identificadores do catálogo seguidos de `:1g` (por exemplo, `tjsp:1g`, `trf3:1g` e `trt24:1g`). Isso habilita o cliente SOAP 1.1 / MNI 2.2.2 para o endereço informado, não cria compatibilidade com APIs SAJ/Projudi próprias, eproc ou MNI 3.0. Serviços que exigem certificado cliente ou IP fixo precisam de infraestrutura e adaptação adicionais.
+
+Há perfis de endpoint embutidos para `tjpi:1g`, `tjes:1g`, `tjam:1g`, `trf1:1g`, `trt6:1g` e `trt15:1g`. Eles só são ativados se a respectiva chave estiver presente em `COURT_CONNECTORS`; o serviço não é consultado anonimamente por padrão. Exemplo de configuração de um perfil, com credenciais fictícias:
+
+```json
+{
+  "trt6:1g": {
+    "username": "IDENTIFICADOR_AUTORIZADO",
+    "password": "SENHA_DO_SERVICO"
+  }
+}
+```
+
+Para outros tribunais, informe também `endpoint`. Use apenas acesso concedido pelo tribunal. Um contrato WSDL acessível não comprova permissão para consultar processos.
+
+O TJRN permanece pendente até que o tribunal confirme um endpoint MNI acessível e as condições de acesso; uma URL de consulta pública no navegador não substitui esse serviço. Configure `tjrn:1g` apenas com o endereço autorizado fornecido pelo tribunal. Não use URLs antigas ou de outro segmento da Justiça.
 
 O conector Projudi/TJGO consulta as operações públicas 74 (dados) e 75 (movimentações), verifica a correspondência do número e a indicação de consulta pública e preserva os acentos de respostas ISO-8859-1. Respostas ambíguas, sigilosas, incompletas ou com paginação ainda não reconhecida geram erro e não confirmam um histórico parcial. A serventia não é usada como nome da comarca. A primeira validação com processo real continua necessária para confirmar variações do contrato e da paginação.
 
@@ -164,7 +188,7 @@ Depois da implantação, valide o redirecionamento ao login em sessão anônima,
 - A primeira consulta bem-sucedida registra o histórico sem criar avisos retroativos. Movimentos novos, mesmo com datas antigas, geram avisos nas consultas seguintes.
 - As notificações são persistentes no site; não há e-mail, Telegram, push ou alerta com o site fechado. A lista é atualizada a cada minuto enquanto a página está visível.
 - Falhas do tribunal mantêm o último histórico confirmado e mostram erro. Uma resposta vazia de pesquisa não prova inexistência nem ausência de mudanças.
-- Datas são exibidas no horário de Brasília. Datas compactas do MNI usam o fuso do tribunal.
+- Datas são exibidas no horário de Brasília. Datas compactas do MNI usam o município do órgão julgador, quando informado, ou o fuso do tribunal. Regiões que abrangem mais de um fuso (TRF1, TRF3 e TRT14) exigem município ou data com fuso explícito; datas ambíguas não são confirmadas.
 - Os avisos representam mudanças encontradas pelo conector. Não substituem os canais oficiais do tribunal.
 - Processos excluídos removem histórico e notificações em cascata. Exporte o banco antes de alterações importantes.
 

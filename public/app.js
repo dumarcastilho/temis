@@ -1,5 +1,5 @@
 import { bindCnjMask } from './cnj-mask.js';
-import { processState, sortProcessList, processListText, formatLocality } from './process-list.js';
+import { processState, sortProcessList, processListText, formatLocality, processTrackingStatus, sortTrackingProcesses } from './process-list.js';
 const $ = selector => document.querySelector(selector);
 const state = { processes: [], visibleProcesses: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes', processView: 'tracking' };
 try { if (localStorage.getItem('temis.processView') === 'simple') state.processView = 'simple'; } catch {}
@@ -18,26 +18,26 @@ async function api(path, method = 'GET', body) {
 }
 async function busy(button, task) { button.disabled = true; try { return await task(); } finally { button.disabled = false; } }
 function configured(p) { return state.session?.courts.find(c => c.id === p.tribunal)?.instances.find(i => i.instance === p.instance)?.configured; }
-function status(p) { return !p.active ? ['paused', 'Pausado'] : p.last_error ? ['error','Precisa de atenção'] : !configured(p) ? ['error','Integração pendente'] : !p.initialized ? ['paused','Primeira consulta pendente'] : ['ok','Em acompanhamento']; }
+function status(p) { return processTrackingStatus(p, !!configured(p)); }
 function render() {
   const simple = state.processView === 'simple';
   const query = $('#search').value.toLowerCase().trim(), court = $('#court-filter').value, filter = simple ? '' : $('#status-filter').value;
   const filtered = state.processes.filter(p => (!query || `${p.number} ${format(p.number)} ${p.label} ${p.locality || ''}`.toLowerCase().includes(query)) && (!court || p.tribunal === court) && (!filter || filter === 'active' && p.active || filter === 'paused' && !p.active || filter === 'error' && (p.last_error || !configured(p)) || filter === 'unread' && p.unread));
-  const rows = simple ? sortProcessList(filtered) : filtered;
+  const rows = simple ? sortProcessList(filtered) : sortTrackingProcesses(filtered, configured);
   state.visibleProcesses = rows;
   $('#processes-view').classList.toggle('simple-mode', simple);
   $('#processes-title').innerHTML = simple ? 'Processos cadastrados<span>.</span>' : 'Seus processos, em dia<span>.</span>';
-  $('#processes-subtitle').textContent = simple ? 'Sua lista de processos por estado e comarca, pronta para consultar e copiar.' : 'Acompanhe movimentações e mantenha tudo em um só lugar.';
+  $('#processes-subtitle').textContent = simple ? 'Sua lista de processos por estado ou região e comarca, pronta para consultar e copiar.' : 'Acompanhe movimentações e mantenha tudo em um só lugar.';
   $('#processes-view .stats').hidden = simple;
   $('#processes-view .info-note').hidden = simple;
   $('#status-filter').hidden = simple;
   $('#copy-list').hidden = !simple;
   $('#copy-list').disabled = !rows.length;
   $('#portfolio-name').textContent = simple ? 'Lista de processos' : 'Carteira de processos';
-  $('#portfolio-description').textContent = simple ? 'UF, comarca e número dos processos cadastrados.' : 'As atualizações mais importantes, perto de você.';
-  $('#list-source-note').textContent = simple ? 'Organizada por UF e comarca' : 'Consulta direta aos tribunais';
+  $('#portfolio-description').textContent = simple ? 'UF ou região, comarca e número dos processos cadastrados.' : 'As atualizações mais importantes, perto de você.';
+  $('#list-source-note').textContent = simple ? 'Organizada por UF / região e comarca' : 'Ordenada por acompanhamento';
   document.querySelectorAll('[data-process-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.processView === state.processView)));
-  $('#process-table-head').innerHTML = simple ? '<tr><th>UF</th><th>COMARCA / LOCALIDADE</th><th>PROCESSO / IDENTIFICAÇÃO</th><th><span class="sr-only">Ações</span></th></tr>' : '<tr><th>PROCESSO / IDENTIFICAÇÃO</th><th>TRIBUNAL</th><th>ÚLTIMA MOVIMENTAÇÃO</th><th>ACOMPANHAMENTO</th><th><span class="sr-only">Ações</span></th></tr>';
+  $('#process-table-head').innerHTML = simple ? '<tr><th>UF / REGIÃO</th><th>COMARCA / LOCALIDADE</th><th>PROCESSO / IDENTIFICAÇÃO</th><th><span class="sr-only">Ações</span></th></tr>' : '<tr><th>PROCESSO / IDENTIFICAÇÃO</th><th>TRIBUNAL</th><th>ÚLTIMA MOVIMENTAÇÃO</th><th>ACOMPANHAMENTO</th><th><span class="sr-only">Ações</span></th></tr>';
   $('#total-stat').textContent = $('#nav-count').textContent = state.processes.length;
   $('#active-stat').textContent = state.processes.filter(p => p.active).length;
   $('#unread-stat').textContent = $('#nav-unread').textContent = state.processes.reduce((sum,p) => sum + p.unread, 0);
@@ -104,12 +104,17 @@ async function loadNotifications(append) {
   $('#more-notifications').hidden = !result.hasMore;
 }
 function renderCourts() {
-  $('#courts-list').innerHTML = state.session.courts.map(c => `<article class="court-card"><h2>${esc(c.id.toUpperCase())} · ${esc(c.name)}</h2><p>${esc(c.system)} · Consulta direta</p>${c.instances.map(i => {
+  const normalize = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const query = normalize($('#court-search').value.trim());
+  const branch = $('#court-branch').value, availability = $('#court-availability').value;
+  const courts = state.session.courts.filter(c => (!query || normalize(`${c.id} ${c.name}`).includes(query)) && (!branch || c.branch === branch) && (!availability || !!c.instances.find(i => i.instance === '1g')?.configured === (availability === 'configured')));
+  $('#court-result-count').textContent = `${courts.length} de ${state.session.courts.length} tribunal(is)`;
+  $('#courts-list').innerHTML = courts.map(c => `<article class="court-card"><h2>${esc(c.id.toUpperCase())} · ${esc(c.name)}</h2><p>${esc(c.system)} · ${esc({state:'Justiça Estadual',federal:'Justiça Federal',labor:'Justiça do Trabalho'}[c.branch] || 'Consulta direta')}</p>${c.instances.map(i => {
     const confirmed = state.processes.some(p => p.tribunal === c.id && p.instance === i.instance && p.initialized && p.checked_at && !p.last_error);
     const failed = state.processes.some(p => p.tribunal === c.id && p.instance === i.instance && p.last_error);
-    const label = !i.configured ? 'Aguarda configuração' : failed ? 'Verificar acesso' : confirmed ? 'Consulta confirmada' : 'Aguardando primeira consulta';
+    const label = !i.configured ? i.requiresCredentials ? 'Aguarda credenciamento' : 'Aguarda configuração' : failed ? 'Verificar acesso' : confirmed ? 'Consulta confirmada' : 'Aguardando primeira consulta';
     return `<div class="instance-state"><span>${i.instance === '1g' ? '1º' : '2º'} grau</span><span class="status ${i.configured && confirmed && !failed ? 'ok' : 'error'}">${label}</span></div>`;
-  }).join('')}${c.id === 'tjrn' ? '<p>O acesso automático depende da confirmação do serviço MNI e das permissões fornecidas pelo tribunal.</p>' : c.id === 'tjba' ? '<p>O serviço oficial de 1º grau está configurado. A primeira consulta confirma se há acesso; o tribunal pode exigir credenciais ou liberação da conexão.</p>' : c.id === 'tjgo' ? '<p>Conector público do Projudi para 1º grau. A primeira consulta válida confirma a integração; a comarca pode ser preenchida manualmente.</p>' : ''}<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Consulta oficial ↗</a></article>`).join('');
+  }).join('')}${c.id === 'tjrn' ? '<p>O acesso automático depende da confirmação do serviço MNI e das permissões fornecidas pelo tribunal.</p>' : c.id === 'tjba' ? '<p>O serviço oficial de 1º grau está configurado. A primeira consulta confirma se há acesso; o tribunal pode exigir credenciais ou liberação da conexão.</p>' : c.id === 'tjgo' ? '<p>Conector público do Projudi para 1º grau. A primeira consulta válida confirma a integração; a comarca pode ser preenchida manualmente.</p>' : c.branch === 'labor' ? '<p>O acesso automático pode exigir credenciamento pelo tribunal. O cadastro de um processo não confirma a liberação da consulta.</p>' : !c.instances.some(i => i.configured) ? '<p>Consulta automática pendente de serviço compatível e acesso autorizado pelo tribunal.</p>' : ''}<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Consulta oficial ↗</a></article>`).join('');
 }
 async function handleClick(event) {
   const button = event.target.closest('button'); if (!button) return;
@@ -145,6 +150,7 @@ async function handleClick(event) {
 }
 document.addEventListener('click', event => { error(''); handleClick(event).catch(async e => { error(e.message); if ($('#detail-dialog').open) { $('#detail-error').textContent = e.message; $('#detail-error').hidden = false; } }); });
 for (const selector of ['#search','#court-filter','#status-filter']) $(selector).addEventListener('input', render);
+for (const selector of ['#court-search','#court-branch','#court-availability']) $(selector).addEventListener('input', renderCourts);
 $('#process-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#form-error').textContent = '';
   try { await busy($('#save-process'), async () => {
@@ -162,7 +168,13 @@ $('#process-form').addEventListener('submit', async event => {
 async function start() {
   try {
     state.session = await api('/session'); $('#user-email').textContent = state.session.email;
-    for(const court of state.session.courts) { const option = document.createElement('option'); option.value=court.id;option.textContent=court.id.toUpperCase();$('#court-filter').append(option); }
+    for (const [branch, label] of Object.entries({state:'Justiça Estadual',federal:'Justiça Federal',labor:'Justiça do Trabalho'})) {
+      const group = document.createElement('optgroup'); group.label = label;
+      for (const court of state.session.courts.filter(c => c.branch === branch)) {
+        const option = document.createElement('option'); option.value = court.id; option.textContent = `${court.id.toUpperCase()} · ${court.name}`; group.append(option);
+      }
+      $('#court-filter').append(group);
+    }
     renderCourts(); await refresh();
     setInterval(async () => { if(document.hidden || document.querySelector('dialog[open]'))return; try {await refresh();if(state.view==='notifications'){state.notificationPage=0;await loadNotifications(false);}}catch(e){error(e.message);} },60000);
   } catch(e) { error(e.message); $('#user-email').textContent = 'Acesso indisponível'; $('#result-count').textContent = 'Não foi possível carregar os processos.'; }

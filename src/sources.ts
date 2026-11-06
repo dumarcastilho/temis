@@ -1,5 +1,5 @@
 import type { Env, ProcessRow } from './env';
-import { connectors, validateEndpoint } from './courts';
+import { connectors, courts, validateEndpoint } from './courts';
 import { envelope, parseMniProcess, soapXml, SourceError } from './mni.js';
 import { parseGoProcess, parseGoMovements } from './projudi.js';
 
@@ -126,7 +126,7 @@ export async function queryProcess(process: ProcessRow, env: Env): Promise<Proce
     body: envelope(process.number, connector),
   }); } catch { throw new SourceError('Não foi possível conectar ao serviço MNI do tribunal dentro do prazo. Tente novamente mais tarde; se persistir, confirme o endpoint e as condições de acesso com o tribunal.'); }
   const xml = soapXml(await boundedResponse(response), response.headers.get('content-type') || '');
-  const result = parseMniProcess(xml, process.number, process.tribunal === 'tjmt' ? '-04:00' : '-03:00');
+  const result = parseMniProcess(xml, process.number, courts.find(c => c.id === process.tribunal)?.offset || '-03:00');
   const locality = !process.locality?.trim() && result.municipalityCode ? await municipalityName(result.municipalityCode) : '';
   return { movements: result.movements, locality };
 }

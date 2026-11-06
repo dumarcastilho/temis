@@ -1,6 +1,6 @@
 import { maskCnj } from './cnj-mask.js';
 
-export const processState = process => process.tribunal.replace(/^tj/, '').toUpperCase();
+export const processState = process => process.tribunal === 'tjdft' ? 'DF' : process.tribunal.replace(/^tj/, '').toUpperCase();
 const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
 const localityConnectors = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
 
@@ -14,6 +14,19 @@ export function sortProcessList(processes) {
     collator.compare(processState(a), processState(b)) ||
     collator.compare(a.locality || '', b.locality || '') ||
     collator.compare(a.number, b.number) || collator.compare(a.instance, b.instance));
+}
+
+export function processTrackingStatus(process, configured = true) {
+  if (!process.active) return ['paused', 'Pausado', 3];
+  if (process.last_error) return ['error', 'Precisa de atenção', 0];
+  if (!configured) return ['error', 'Integração pendente', 0];
+  if (!process.initialized) return ['paused', 'Primeira consulta pendente', 1];
+  return ['ok', 'Em acompanhamento', 2];
+}
+
+export function sortTrackingProcesses(processes, isConfigured) {
+  return [...processes].sort((a, b) =>
+    processTrackingStatus(a, !!isConfigured(a))[2] - processTrackingStatus(b, !!isConfigured(b))[2]);
 }
 
 export function processListText(processes) {

@@ -1,9 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMni, envelope, soapXml } from '../src/mni.js';
+import { parseMni, parseMniProcess, envelope, soapXml } from '../src/mni.js';
 
 const number = '99999990020998119999';
 const xml = (movements='',success='true',n=number) => `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><r:consultarProcessoResposta xmlns:r="urn:test"><sucesso>${success}</sucesso><processo><dadosBasicos numero="${n}"/>${movements}</processo></r:consultarProcessoResposta></s:Body></s:Envelope>`;
+test('MNI uses the court municipality timezone for multi-state regions and refuses ambiguous local timestamps', () => {
+  const movement = '<movimento dataHora="20990101120000"><movimentoLocal descricao="Movimento sintético"/></movimento>';
+  for (const [code, hour] of [['1200000', '17'], ['1300000', '16'], ['3500000', '15']]) {
+    const response = xml(movement).replace(`<dadosBasicos numero="${number}"/>`, `<dadosBasicos numero="${number}"><orgaoJulgador codigoMunicipioIBGE="${code}"/></dadosBasicos>`);
+    assert.equal(parseMniProcess(response, number, 'auto').movements[0].date, `2099-01-01T${hour}:00:00.000Z`);
+  }
+  assert.throws(() => parseMniProcess(xml(movement), number, 'auto'), /município ou fuso/);
+  assert.equal(parseMniProcess(xml(movement.replace('20990101120000', '2099-01-01T12:00:00Z')), number, 'auto').movements[0].date, '2099-01-01T12:00:00.000Z');
+});
 test('parses namespaced MNI, local descriptions, leading zeros and local dates', () => {
   const moves = parseMni(xml('<movimento dataHora="20990101120000" identificadorMovimento="0001"><complemento>Exemplo sintético</complemento><movimentoLocal codigoMovimento="9" descricao="Juntada"/></movimento>'),number,'-04:00');
   assert.equal(moves.length,1); assert.equal(moves[0].date,'2099-01-01T16:00:00.000Z');

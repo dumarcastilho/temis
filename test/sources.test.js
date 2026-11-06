@@ -110,6 +110,34 @@ test('the default TJPE first-instance connector parses multipart SOAP with synth
 
 const municipalXml = code => `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><consultarProcessoResposta><sucesso>true</sucesso><processo><dadosBasicos numero="${number}" codigoLocalidade="9999"><orgaoJulgador codigoMunicipioIBGE="${code}" nomeOrgao="Órgão sintético"/></dadosBasicos><movimento dataHora="20990101120000"><movimentoLocal codigoMovimento="9" descricao="Movimento sintético"/></movimento></processo></consultarProcessoResposta></s:Body></s:Envelope>`;
 
+test('national MNI profiles route only after explicit setup and keep credentials on the server', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [tribunal, endpoint, hour] of [
+      ['tjpi', 'https://pje.tjpi.jus.br/1g/intercomunicacao', '15'],
+      ['tjes', 'https://pje.tjes.jus.br/pje/intercomunicacao', '15'],
+      ['tjam', 'https://consultasaj.tjam.jus.br/mniws/servico-intercomunicacao-2.2.2/intercomunicacao', '16'],
+      ['trf1', 'https://pje1g.trf1.jus.br/pje/intercomunicacao', '15'],
+      ['trt6', 'https://pje.trt6.jus.br/primeirograu/servicosweb/mni222/intercomunicacao', '15'],
+      ['trt15', 'https://pje.trt15.jus.br/primeirograu/servicosweb/mni222/intercomunicacao', '15'],
+    ]) {
+      let calls = 0;
+      globalThis.fetch = async (url, options) => {
+        calls++; assert.equal(String(url), endpoint); assert.equal(options.redirect, 'manual');
+        assert.ok(options.body.includes('<tip:idConsultante>synthetic</tip:idConsultante>'));
+        assert.ok(options.body.includes('<tip:senhaConsultante>synthetic-secret</tip:senhaConsultante>'));
+        return new Response(municipalXml(tribunal === 'trf1' ? '3500000' : ''));
+      };
+      const process = { number, tribunal, instance: '1g', locality: 'Comarca manual' };
+      await assert.rejects(queryProcess(process, {}), /aguarda configuração/); assert.equal(calls, 0);
+      const env = { COURT_CONNECTORS: JSON.stringify({[`${tribunal}:1g`]: { username:'synthetic', password:'synthetic-secret' }}) };
+      const result = await queryProcess(process, env);
+      assert.equal(calls, 1); assert.equal(result.movements[0].date, `2099-01-01T${hour}:00:00.000Z`);
+      assert.ok(!JSON.stringify(result).includes('synthetic-secret'));
+    }
+  } finally { globalThis.fetch = original; }
+});
+
 test('MNI resolves only the court municipality code and skips IBGE when locality was entered manually', async () => {
   const original = globalThis.fetch, calls = [];
   globalThis.fetch = async (url, options) => {

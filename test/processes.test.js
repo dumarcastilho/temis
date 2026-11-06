@@ -25,12 +25,52 @@ test('court availability enables new first-instance connectors without enabling 
   const response = await request({ LOCAL_DEV: 'true' }, '/api/session');
   assert.equal(response.status, 200);
   const { courts } = await response.json();
+  assert.equal(courts.length, 57);
+  assert.equal(courts.filter(c => c.branch === 'state').length, 27);
+  assert.equal(courts.filter(c => c.branch === 'federal').length, 6);
+  assert.equal(courts.filter(c => c.branch === 'labor').length, 24);
   const configured = (court, instance) => courts.find(c => c.id === court).instances.find(i => i.instance === instance).configured;
   for (const court of ['tjgo', 'tjba', 'tjpe']) {
     assert.equal(configured(court, '1g'), true);
     assert.equal(configured(court, '2g'), false);
   }
   assert.equal(configured('tjrn', '1g'), false);
+  for (const court of ['tjpi', 'tjes', 'tjam']) {
+    assert.equal(configured(court, '1g'), false);
+    assert.equal(courts.find(c => c.id === court).instances[0].requiresCredentials, true);
+  }
+  for (const court of courts.filter(c => c.branch !== 'state')) assert.equal(configured(court.id, '1g'), false);
+});
+
+test('all national catalog courts accept valid synthetic CNJ registration while excluded branches remain unavailable', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    for (const migration of migrations) db.exec(migration);
+    const env = { DB: binding(db), LOCAL_DEV: 'true' };
+    const { courts } = await (await request(env, '/api/session')).json();
+    for (const court of courts) {
+      const suffix = `2099${court.cnjBranch}${court.cnjCode}9999`;
+      const base = '9999999' + suffix + '00';
+      let mod = 0; for (const digit of base) mod = (mod * 10 + Number(digit)) % 97;
+      const number = '9999999' + String(98 - mod).padStart(2, '0') + suffix;
+      const result = await request(env, '/api/processes', 'POST', { number, instance: '1g' });
+      assert.equal(result.status, 201, court.id);
+    }
+    const rows = await (await request(env, '/api/processes')).json();
+    assert.equal(rows.length, 57); assert.equal(new Set(rows.map(p => p.tribunal)).size, 57);
+    assert.ok(rows.every(p => p.instance === '1g' && !p.initialized && !p.checked_at));
+  } finally { db.close(); }
+});
+
+test('session indicates configured regional connectors without returning service credentials or endpoints', async () => {
+  const env = { LOCAL_DEV:'true', COURT_CONNECTORS:JSON.stringify({'trt6:1g':{username:'synthetic-user',password:'synthetic-secret'}}) };
+  const response = await request(env, '/api/session');
+  const result = await response.json();
+  assert.equal(result.courts.find(c=>c.id==='trt6').instances[0].configured, true);
+  assert.equal(result.courts.find(c=>c.id==='trt15').instances[0].configured, false);
+  assert.ok(!JSON.stringify(result).includes('synthetic-user'));
+  assert.ok(!JSON.stringify(result).includes('synthetic-secret'));
+  assert.ok(!JSON.stringify(result).includes('mni222/intercomunicacao'));
 });
 
 test('locality migration preserves existing processes, histories, notifications and read markers', () => {

@@ -1,11 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { processListText, sortProcessList, formatLocality } from '../public/process-list.js';
+import { processState, processListText, sortProcessList, formatLocality, processTrackingStatus, sortTrackingProcesses } from '../public/process-list.js';
 
 const rows = [
   { number: '99999990020998209999', tribunal: 'tjrn', locality: 'Comarca B', instance: '1g', active: 0, last_error: 'Erro que não deve constar na lista', latest_movement: 'Andamento que não deve constar na lista' },
   { number: '99999990020998059999', tribunal: 'tjba', locality: 'Comarca A', instance: '1g', label: 'Identificação interna', notes: 'Anotação privada' },
 ];
+
+test('tracking groups attention and missing integration before first checks, monitored and paused cases, preserving order within each group', () => {
+  const rows = [
+    { id: 'monitored-a', active: 1, initialized: 1 },
+    { id: 'paused-error', active: 0, initialized: 1, last_error: 'Falha sintética' },
+    { id: 'attention', active: 1, initialized: 1, last_error: 'Falha sintética' },
+    { id: 'first', active: 1, initialized: 0 },
+    { id: 'unconfigured', active: 1, initialized: 0 },
+    { id: 'monitored-b', active: 1, initialized: 1 },
+  ];
+  const originalOrder = rows.map(p => p.id);
+  const configured = p => p.id !== 'unconfigured';
+  assert.deepEqual(sortTrackingProcesses(rows, configured).map(p => p.id), ['attention', 'unconfigured', 'first', 'monitored-a', 'monitored-b', 'paused-error']);
+  assert.deepEqual(rows.map(p => p.id), originalOrder);
+  assert.equal(processTrackingStatus(rows[1], true)[1], 'Pausado');
+  assert.equal(processTrackingStatus(rows[4], false)[1], 'Integração pendente');
+  assert.deepEqual(sortTrackingProcesses([], configured), []);
+});
 
 test('locality names keep accents and Portuguese connectors in display and copied lists', () => {
   for (const [input, expected] of [
@@ -33,4 +51,10 @@ test('missing localities and second-instance entries remain unambiguous', () => 
   assert.equal(processListText([]), '');
   const text = processListText([{ ...rows[0], locality: '', instance: '2g' }]);
   assert.ok(text.includes('Comarca não informada')); assert.ok(text.endsWith('2º grau'));
+});
+
+test('simple lists identify the Federal District and regional courts without inventing a state', () => {
+  assert.equal(processState({ tribunal: 'tjdft' }), 'DF');
+  assert.equal(processState({ tribunal: 'trf1' }), 'TRF1');
+  assert.equal(processState({ tribunal: 'trt15' }), 'TRT15');
 });

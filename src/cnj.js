@@ -1,4 +1,5 @@
 // Dumar Castilho - https://github.com/dumarcastilho
+import { courtCatalog } from './court-catalog.js';
 export function normalizeNumber(value) {
   if (typeof value !== 'string' || !/^[\d.\-\s]+$/.test(value)) throw new Error('Informe um número CNJ válido.');
   const digits = value.replace(/\D/g, '');
@@ -14,13 +15,8 @@ export function formatNumber(n) {
   return n.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
 }
 
-const stateCodes = ['tjac','tjal','tjap','tjam','tjba','tjce','tjdft','tjes','tjgo','tjma','tjmt','tjms','tjmg','tjpa','tjpb','tjpr','tjpe','tjpi','tjrj','tjrn','tjrs','tjro','tjrr','tjsc','tjse','tjsp','tjto'];
 export function tribunalFor(n) {
-  const branch = n[13];
-  const court = Number(n.slice(14, 16));
-  if (branch === '8' && court >= 1 && court <= 27) return stateCodes[court - 1];
-  if (branch === '5' && court >= 1 && court <= 24) return `trt${court}`;
-  if (branch === '4' && court >= 1 && court <= 6) return `trf${court}`;
-  if (branch === '3' && court === 0) return 'stj';
+  const court = courtCatalog.find(c => c.cnjBranch === n[13] && c.cnjCode === n.slice(14, 16));
+  if (court) return court.id;
   throw new Error('Este segmento ou tribunal ainda não é suportado.');
 }

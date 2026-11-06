@@ -1,3 +1,4 @@
+import { bindCnjMask } from './cnj-mask.js';
 const $ = selector => document.querySelector(selector);
 const state = { processes: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes' };
 const format = n => n.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
@@ -123,4 +124,5 @@ async function start() {
     setInterval(async () => { if(document.hidden || document.querySelector('dialog[open]'))return; try {await refresh();if(state.view==='notifications'){state.notificationPage=0;await loadNotifications(false);}}catch(e){error(e.message);} },60000);
   } catch(e) { error(e.message); $('#user-email').textContent = 'Acesso indisponível'; $('#result-count').textContent = 'Não foi possível carregar os processos.'; }
 }
+bindCnjMask($('#number'));
 start();

@@ -11,15 +11,18 @@ export async function checkProcess(env: Env, id: string, manual = false) {
     .bind(token, now + 180000, id, now, now, manual ? 1 : 0, new Date(now - 60000).toISOString()).first<ProcessRow>();
   if (!row) return { status: 'skipped', added: 0 };
   const interval = Math.max(15, Math.min(1440, Number(env.CHECK_INTERVAL_MINUTES) || 120)) * 60000;
+  let stage = 'query_source';
   try {
     const movements = await querySource(row, env);
     // Resolve identities before making any writes: an invalid response never creates a partial baseline.
+    stage = 'prepare_history';
     const prepared = await Promise.all(movements.map(async m => ({ ...m, id: await hash(row.id + ':' + m.key) })));
     // Lease ownership prevents a slow, superseded run from writing a snapshot.
     const current = await env.DB.prepare('SELECT lease_token FROM processes WHERE id=?').bind(id).first<{ lease_token: string }>();
     if (current?.lease_token !== token) return { status: 'skipped', added: 0 };
     let added = 0;
     // D1 batches are atomic. Each notification is derived from the same insert transaction.
+    stage = 'persist_history';
     for (let offset = 0; offset < prepared.length; offset += 30) {
       const statements: D1PreparedStatement[] = [];
       for (const movement of prepared.slice(offset, offset + 30)) {
@@ -30,10 +33,12 @@ export async function checkProcess(env: Env, id: string, manual = false) {
       const results = await env.DB.batch(statements);
       for (let i = 0; i < results.length; i += row.initialized ? 2 : 1) added += results[i].meta.changes;
     }
+    stage = 'complete_check';
     await env.DB.prepare(`UPDATE processes SET initialized=1,checked_at=?,last_error=NULL,next_check_at=?,lease_until=0,lease_token=NULL WHERE id=? AND lease_token=?`)
       .bind(new Date().toISOString(), now + interval, id, token).run();
     return { status: 'ok', added: row.initialized ? added : 0 };
   } catch (error) {
+    console.error('process_check_failed', { stage, tribunal: row.tribunal, error_name: error instanceof Error ? error.name : 'UnknownError' });
     const message = error instanceof SourceError ? error.message : 'Não foi possível concluir a consulta ao tribunal. Tente novamente mais tarde.';
     await env.DB.prepare(`UPDATE processes SET last_error=?,next_check_at=?,lease_until=0,lease_token=NULL WHERE id=? AND lease_token=?`)
       .bind(message, now + Math.min(interval, 30 * 60000), id, token).run();

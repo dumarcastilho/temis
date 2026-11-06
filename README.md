@@ -7,6 +7,7 @@ Acompanhamento privado de processos judiciais em Cloudflare Workers, com banco C
 ## Funcionalidades
 
 - Cadastro de número CNJ com validação do dígito verificador, identificação, observações e instância.
+- Máscara CNJ durante a digitação e colagem, com preservação de zeros iniciais e teclado numérico no celular.
 - Carteira compartilhada entre os usuários autorizados no Cloudflare Access.
 - Filtros por tribunal, identificação, status e avisos não lidos.
 - Consulta direta ao tribunal, histórico paginado e primeira consulta usada como referência inicial.
@@ -81,6 +82,8 @@ O `database_id` com zeros em `wrangler.jsonc` é um marcador para desenvolviment
 Os valores de execução definidos no painel são preservados quando não forem fornecidos pelo build. Valores definidos no build têm precedência para as quatro variáveis de execução suportadas (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `APP_ORIGIN`, `CHECK_INTERVAL_MINUTES`). Segredos de conectores não são copiados para o arquivo temporário.
 
 Não use `npx wrangler deploy` diretamente com o arquivo de exemplo sem substituir seu marcador por uma configuração local válida. A ausência de configuração do Cloudflare Access bloqueia o acesso com HTTP 503; ela não abre o site ao público. Configure os e-mails permitidos e o hostname em Access antes de utilizar a aplicação.
+
+Para atualizar uma aplicação conectada ao GitHub, envie as alterações para a branch de produção configurada (normalmente `main`). Com builds automáticos habilitados, o Workers Builds inicia a implantação. Acompanhe o resultado em **Workers & Pages → seu Worker → Builds/Implantações**; se necessário, inicie um novo build da versão mais recente. Mantenha o comando `pnpm run deploy:ci` e as variáveis existentes. As migrações já aplicadas são reconhecidas e o banco existente é preservado. Após concluir o deploy, recarregue a página para carregar os arquivos atualizados.
 
 ### 1. Banco e configuração do Worker
 

@@ -6,6 +6,7 @@ export interface Movement { key: string; date: string; description: string }
 const TJMT = 'https://hellsgate.tjmt.jus.br/consultaprocessual/ProcessosJudiciais';
 
 async function boundedResponse(response: Response): Promise<string> {
+  if (response.status >= 300 && response.status < 400) throw new SourceError('O tribunal redirecionou a consulta. O histórico não foi alterado; verifique a disponibilidade do serviço.');
   if (!response.ok) throw new SourceError(`Tribunal indisponível (HTTP ${response.status}).`);
   const reader = response.body?.getReader();
   if (!reader) throw new SourceError('Tribunal retornou resposta vazia.');
@@ -25,7 +26,7 @@ async function boundedResponse(response: Response): Promise<string> {
 }
 
 async function getJson(url: string): Promise<any> {
-  const response = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(20000) });
+  const response = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(20000) });
   try { return JSON.parse(await boundedResponse(response)); }
   catch (error) { if (error instanceof SourceError) throw error; throw new SourceError('Formato inesperado na consulta TJMT.'); }
 }
@@ -52,7 +53,7 @@ export async function queryTjmt(number: string, instance: string): Promise<Movem
     const detail = await getJson(`${TJMT}/${number}/${code}`);
     if (detail.numeroUnico !== number || detail.segredo || !Array.isArray(detail.eventos)) throw new SourceError('TJMT não retornou histórico público válido.');
     for (const event of detail.eventos) {
-      if (event.sigilo) continue;
+      if (event?.sigilo) continue;
       if (!event || typeof event.data !== 'string' || !Number.isFinite(Date.parse(event.data))) throw new SourceError('Evento TJMT fora do formato esperado.');
       // Legacy systems may provide only the event type, with a null or blank description.
       const description = (typeof event.descricao === 'string' && event.descricao.trim()) || (typeof event.tipo === 'string' && event.tipo.trim()) || 'Movimentação sem descrição no tribunal';
@@ -69,7 +70,7 @@ export async function querySource(process: ProcessRow, env: Env): Promise<Moveme
   if (!connector) throw new SourceError('Integração direta deste tribunal/instância aguarda configuração e validação.');
   const endpoint = validateEndpoint(connector.endpoint);
   const response = await fetch(endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(25000),
+    method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(25000),
     headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"' },
     body: envelope(process.number, connector),
   });

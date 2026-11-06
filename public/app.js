@@ -56,12 +56,13 @@ function render() {
     return `<tr><td><button class="process-title" data-detail="${p.id}">${esc(format(p.number))}${p.unread ? `<span class="new-badge">${p.unread} nova(s)</span>` : ''}</button><span class="process-label">${esc(p.label || 'Sem identificação')}</span></td><td><span class="court-tag">${esc(p.tribunal.toUpperCase())}</span><span class="timestamp">${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><span class="movement-summary">${esc(p.latest_movement || 'Aguardando primeira consulta')}</span><span class="timestamp">${p.latest_movement_at ? esc(date(p.latest_movement_at)) : '—'}</span></td><td><span class="status ${className}">${label}</span><span class="timestamp">${p.checked_at ? 'Verificado ' + esc(date(p.checked_at)) : 'Sem consulta confirmada'}</span></td><td><button class="row-arrow" data-detail="${p.id}" aria-label="Ver histórico de ${esc(format(p.number))}">›</button></td></tr>`;
   }).join('');
 }
-async function refresh() { state.processes = await api('/processes'); render(); }
+async function refresh() { state.processes = await api('/processes'); render(); if (state.view === 'courts') renderCourts(); }
 async function setView(view) {
   state.view = view;
   for (const v of ['processes','notifications','courts']) $(`#${v}-view`).hidden = v !== view;
   document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('selected', button.dataset.view === view));
   $('#breadcrumb').textContent = {processes:'Processos', notifications:'Notificações', courts:'Tribunais'}[view];
+  if (view === 'courts') renderCourts();
   if (view === 'notifications') { state.notificationPage = 0; await loadNotifications(false); }
 }
 function openForm(process) {
@@ -103,7 +104,12 @@ async function loadNotifications(append) {
   $('#more-notifications').hidden = !result.hasMore;
 }
 function renderCourts() {
-  $('#courts-list').innerHTML = state.session.courts.map(c => `<article class="court-card"><h2>${esc(c.id.toUpperCase())} · ${esc(c.name)}</h2><p>${esc(c.system)} · Consulta direta</p>${c.instances.map(i => `<div class="instance-state"><span>${i.instance === '1g' ? '1º' : '2º'} grau</span><span class="status ${i.configured ? 'ok' : 'error'}">${i.configured ? 'Conector configurado' : 'Aguarda integração'}</span></div>`).join('')}<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Consulta oficial ↗</a></article>`).join('');
+  $('#courts-list').innerHTML = state.session.courts.map(c => `<article class="court-card"><h2>${esc(c.id.toUpperCase())} · ${esc(c.name)}</h2><p>${esc(c.system)} · Consulta direta</p>${c.instances.map(i => {
+    const confirmed = state.processes.some(p => p.tribunal === c.id && p.instance === i.instance && p.initialized && p.checked_at && !p.last_error);
+    const failed = state.processes.some(p => p.tribunal === c.id && p.instance === i.instance && p.last_error);
+    const label = !i.configured ? 'Aguarda configuração' : failed ? 'Verificar acesso' : confirmed ? 'Consulta confirmada' : 'Aguardando primeira consulta';
+    return `<div class="instance-state"><span>${i.instance === '1g' ? '1º' : '2º'} grau</span><span class="status ${i.configured && confirmed && !failed ? 'ok' : 'error'}">${label}</span></div>`;
+  }).join('')}${c.id === 'tjrn' ? '<p>O acesso automático depende da confirmação do serviço MNI e das permissões fornecidas pelo tribunal.</p>' : c.id === 'tjba' ? '<p>O serviço oficial de 1º grau está configurado. A primeira consulta confirma se há acesso; o tribunal pode exigir credenciais ou liberação da conexão.</p>' : c.id === 'tjgo' ? '<p>Conector público do Projudi para 1º grau. A primeira consulta válida confirma a integração; a comarca pode ser preenchida manualmente.</p>' : ''}<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Consulta oficial ↗</a></article>`).join('');
 }
 async function handleClick(event) {
   const button = event.target.closest('button'); if (!button) return;

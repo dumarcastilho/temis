@@ -21,6 +21,18 @@ async function request(env, path, method = 'GET', body) {
   return worker.fetch(new Request('http://localhost' + path, { method, headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }), env);
 }
 
+test('court availability enables new first-instance connectors without enabling unvalidated second-instance services', async () => {
+  const response = await request({ LOCAL_DEV: 'true' }, '/api/session');
+  assert.equal(response.status, 200);
+  const { courts } = await response.json();
+  const configured = (court, instance) => courts.find(c => c.id === court).instances.find(i => i.instance === instance).configured;
+  for (const court of ['tjgo', 'tjba', 'tjpe']) {
+    assert.equal(configured(court, '1g'), true);
+    assert.equal(configured(court, '2g'), false);
+  }
+  assert.equal(configured('tjrn', '1g'), false);
+});
+
 test('locality migration preserves existing processes, histories, notifications and read markers', () => {
   const db = new DatabaseSync(':memory:');
   try {

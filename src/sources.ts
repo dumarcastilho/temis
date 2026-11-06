@@ -1,6 +1,7 @@
 import type { Env, ProcessRow } from './env';
 import { connectors, validateEndpoint } from './courts';
 import { envelope, parseMniProcess, soapXml, SourceError } from './mni.js';
+import { parseGoProcess, parseGoMovements } from './projudi.js';
 
 export interface Movement { key: string; date: string; description: string }
 export interface ProcessResult { movements: Movement[]; locality: string }
@@ -27,6 +28,7 @@ async function municipalityName(code: string): Promise<string> {
 
 async function boundedResponse(response: Response): Promise<string> {
   if (response.status >= 300 && response.status < 400) throw new SourceError('O tribunal redirecionou a consulta. O histórico não foi alterado; verifique a disponibilidade do serviço.');
+  if (response.status === 401 || response.status === 403) throw new SourceError(`O tribunal recusou o acesso ao serviço (HTTP ${response.status}). Confirme as permissões, as credenciais quando exigidas e eventuais exigências de liberação de acesso com o tribunal.`);
   if (!response.ok) throw new SourceError(`Tribunal indisponível (HTTP ${response.status}).`);
   const reader = response.body?.getReader();
   if (!reader) throw new SourceError('Tribunal retornou resposta vazia.');
@@ -42,7 +44,11 @@ async function boundedResponse(response: Response): Promise<string> {
   const joined = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) { joined.set(chunk, offset); offset += chunk.length; }
-  return new TextDecoder().decode(joined);
+  const declaration = new TextDecoder().decode(joined.subarray(0, 200));
+  const charset = response.headers.get('content-type')?.match(/charset\s*=\s*["']?([\w-]+)/i)?.[1]
+    || declaration.match(/^\s*<\?xml[^>]*encoding\s*=\s*["']([\w-]+)["']/i)?.[1] || 'utf-8';
+  if (!/^(?:utf-8|utf8|iso-8859-1|windows-1252)$/i.test(charset)) throw new SourceError('Codificação de texto do tribunal não suportada.');
+  return new TextDecoder(charset).decode(joined);
 }
 
 async function getJson(url: string): Promise<any> {
@@ -92,16 +98,33 @@ export async function queryTjmt(number: string, instance: string): Promise<Movem
   return (await queryTjmtProcess(number, instance)).movements;
 }
 
+export async function queryTjgoProcess(number: string): Promise<ProcessResult> {
+  const base = 'https://projudi.tjgo.jus.br/ServicosPublicos';
+  const get = async (params: Record<string, string>): Promise<string> => {
+    let response: Response;
+    try { response = await fetch(`${base}?${new URLSearchParams(params)}`, { headers: { Accept: 'application/xml, text/xml' }, redirect: 'manual', signal: AbortSignal.timeout(20000) }); }
+    catch { throw new SourceError('Não foi possível conectar ao serviço público do TJGO dentro do prazo. Tente novamente mais tarde.'); }
+    return boundedResponse(response);
+  };
+  const simplified = `${number.slice(0, 7)}-${number.slice(7, 9)}.${number.slice(9, 13)}`;
+  const process = parseGoProcess(await get({ PaginaAtual: '2', PosicaoPaginaAtual: '0', a: simplified }), number);
+  const movements = parseGoMovements(await get({ PaginaAtual: '3', a: process.id, b: process.hash }), process.id);
+  // Serventia is a court unit, not a reliable municipality name.
+  return { movements, locality: '' };
+}
+
 export async function queryProcess(process: ProcessRow, env: Env): Promise<ProcessResult> {
   if (process.tribunal === 'tjmt') return queryTjmtProcess(process.number, process.instance);
   const connector = connectors(env)[`${process.tribunal}:${process.instance}`];
+  if (process.tribunal === 'tjgo' && process.instance === '1g' && !connector) return queryTjgoProcess(process.number);
   if (!connector) throw new SourceError('Integração direta deste tribunal/instância aguarda configuração e validação.');
   const endpoint = validateEndpoint(connector.endpoint);
-  const response = await fetch(endpoint, {
+  let response: Response;
+  try { response = await fetch(endpoint, {
     method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(25000),
     headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"' },
     body: envelope(process.number, connector),
-  });
+  }); } catch { throw new SourceError('Não foi possível conectar ao serviço MNI do tribunal dentro do prazo. Tente novamente mais tarde; se persistir, confirme o endpoint e as condições de acesso com o tribunal.'); }
   const xml = soapXml(await boundedResponse(response), response.headers.get('content-type') || '');
   const result = parseMniProcess(xml, process.number, process.tribunal === 'tjmt' ? '-04:00' : '-03:00');
   const locality = !process.locality?.trim() && result.municipalityCode ? await municipalityName(result.municipalityCode) : '';

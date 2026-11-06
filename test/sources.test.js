@@ -3,8 +3,63 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const result = await build({ entryPoints: ['src/sources.ts'], bundle: true, write: false, format: 'esm', platform: 'node', target: 'node24' });
-const { queryTjmt, queryTjmtProcess, querySource, queryProcess } = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
+const { queryTjmt, queryTjmtProcess, queryTjgoProcess, querySource, queryProcess } = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
 const number = '99999990020998119999';
+
+test('TJGO uses the official Projudi service, encodes access identifiers and does not invent a municipality from the court unit', async () => {
+  const original = globalThis.fetch, calls = [];
+  const goNumber = '99999990020998099999';
+  globalThis.fetch = async (url, options) => {
+    const u = new URL(url); calls.push(u);
+    assert.equal(u.origin + u.pathname, 'https://projudi.tjgo.jus.br/ServicosPublicos');
+    assert.equal(options.redirect, 'manual');
+    if (u.searchParams.get('PaginaAtual') === '2') {
+      assert.equal(u.searchParams.get('a'), '9999999-00.2099');
+      return new Response(`<resposta operacao="74" versao="1"><processos><dadosProcesso><numero>${goNumber}</numero><idProcesso>99</idProcesso><hashProcesso>synthetic+hash=</hashProcesso><outrasInformacoes><segredoJustica>false</segredoJustica><serventia>Vara sintética</serventia></outrasInformacoes></dadosProcesso></processos></resposta>`);
+    }
+    assert.equal(u.searchParams.get('a'), '99'); assert.equal(u.searchParams.get('b'), 'synthetic+hash=');
+    return new Response('<resposta operacao="75" versao="1"><situacao>OK</situacao><mensagem><paginacao/><lista><Movimentacao><IdMovimentacao>1</IdMovimentacao><DescricaoMovimentacao>Movimento sintético</DescricaoMovimentacao><DataRealizacao>06/11/2099 12:30:15</DataRealizacao></Movimentacao></lista></mensagem></resposta>');
+  };
+  try {
+    const result = await queryProcess({ number: goNumber, tribunal: 'tjgo', instance: '1g' }, {});
+    assert.equal(result.movements[0].description, 'Movimento sintético'); assert.equal(result.locality, ''); assert.equal(calls.length, 2);
+    await assert.rejects(queryProcess({ number: goNumber, tribunal: 'tjgo', instance: '2g' }, {}), /aguarda configuração/);
+    assert.equal(calls.length, 2);
+    globalThis.fetch = async () => new Response(null, { status: 302, headers: { Location: 'https://other.example.invalid/' } });
+    await assert.rejects(queryTjgoProcess(goNumber), /redirecionou/);
+  } finally { globalThis.fetch = original; }
+});
+
+test('TJGO decodes declared Latin-1 XML without corrupting Portuguese accents', async () => {
+  const original = globalThis.fetch;
+  const n = '99999990020998099999';
+  globalThis.fetch = async url => {
+    const xml = new URL(url).searchParams.get('PaginaAtual') === '2'
+      ? `<resposta operacao="74" versao="1"><processos><dadosProcesso><numero>${n}</numero><idProcesso>99</idProcesso><hashProcesso>synthetic</hashProcesso><outrasInformacoes><segredoJustica>Não</segredoJustica></outrasInformacoes></dadosProcesso></processos></resposta>`
+      : '<resposta operacao="75" versao="1"><situacao>OK</situacao><mensagem><paginacao/><lista><Movimentacao><IdMovimentacao>1</IdMovimentacao><DescricaoMovimentacao>Conclusão à decisão</DescricaoMovimentacao><DataRealizacao>06/11/2099 12:30:15</DataRealizacao></Movimentacao></lista></mensagem></resposta>';
+    return new Response(Buffer.from('<?xml version="1.0" encoding="iso-8859-1"?>' + xml, 'latin1'), { headers: { 'Content-Type': 'text/xml' } });
+  };
+  try { assert.equal((await queryTjgoProcess(n)).movements[0].description, 'Conclusão à decisão'); }
+  finally { globalThis.fetch = original; }
+});
+
+test('TJBA first-instance default uses the published MNI address and reports access and connection failures without leaking credentials', async () => {
+  const original = globalThis.fetch;
+  const process = { number, tribunal: 'tjba', instance: '1g' };
+  try {
+    globalThis.fetch = async (url, options) => {
+      assert.equal(String(url), 'https://pje1g-mni.tjba.jus.br/pje/intercomunicacao');
+      assert.ok(!options.body.includes('senhaConsultante'));
+      return new Response(municipalXml(''));
+    };
+    assert.equal((await queryProcess(process, {})).movements.length, 1);
+    globalThis.fetch = async () => new Response('', { status: 403 });
+    await assert.rejects(queryProcess(process, {}), /recusou o acesso.*403/);
+    globalThis.fetch = async () => { throw new Error('private transport detail'); };
+    await assert.rejects(queryProcess(process, {}), error => /dentro do prazo/.test(error.message) && !error.message.includes('private'));
+    await assert.rejects(queryProcess({ ...process, instance: '2g' }, {}), /aguarda configuração/);
+  } finally { globalThis.fetch = original; }
+});
 
 test('TJMT uses Workers-compatible manual redirects and reads the returned history', async () => {
   const original = globalThis.fetch;

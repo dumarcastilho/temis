@@ -1,7 +1,7 @@
 // Dumar Castilho - https://github.com/dumarcastilho
 import type { Env, ProcessRow } from './env';
 import { authenticate } from './auth';
-import { courts, connectors } from './courts';
+import { courts, connectors, hasPublicConnector } from './courts';
 import { normalizeNumber, tribunalFor } from './cnj.js';
 import { checkProcess, monitor } from './monitor';
 
@@ -36,7 +36,7 @@ async function api(request: Request, env: Env, email: string) {
   const path = url.pathname;
   if (request.method === 'GET' && path === '/api/session') {
     const configured = connectors(env);
-    return json({ email, courts: courts.map(c => ({ ...c, instances: ['1g', '2g'].map(instance => ({ instance, configured: c.id === 'tjmt' || !!configured[`${c.id}:${instance}`] })) })) });
+    return json({ email, courts: courts.map(c => ({ ...c, instances: ['1g', '2g'].map(instance => ({ instance, configured: hasPublicConnector(c.id, instance) || !!configured[`${c.id}:${instance}`] })) })) });
   }
   if (request.method === 'GET' && path === '/api/processes') {
     const rows = await env.DB.prepare(`SELECT p.*, (SELECT description FROM movements WHERE process_id=p.id ORDER BY occurred_at DESC LIMIT 1) latest_movement, (SELECT occurred_at FROM movements WHERE process_id=p.id ORDER BY occurred_at DESC LIMIT 1) latest_movement_at, (SELECT count(*) FROM notifications n WHERE n.process_id=p.id AND NOT EXISTS(SELECT 1 FROM notification_reads r WHERE r.notification_id=n.id AND r.user_email=?)) unread FROM processes p ORDER BY p.created_at DESC`).bind(email).all();

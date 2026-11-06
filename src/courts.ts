@@ -11,7 +11,10 @@ export const courts = [
 export interface Connector { endpoint: string; username?: string; password?: string }
 const defaultConnectors: Record<string, Connector> = {
   'tjpe:1g': { endpoint: 'https://pjemni.app.tjpe.jus.br/1g/servico-intercomunicacao-2.2.2' },
+  'tjba:1g': { endpoint: 'https://pje1g-mni.tjba.jus.br/pje/intercomunicacao' },
 };
+
+export const hasPublicConnector = (tribunal: string, instance: string): boolean => tribunal === 'tjmt' || tribunal === 'tjgo' && instance === '1g';
 export function connectors(env: Env): Record<string, Connector> {
   try { return { ...defaultConnectors, ...JSON.parse(env.COURT_CONNECTORS || '{}') }; }
   catch { throw new Error('Configuração dos conectores inválida.'); }

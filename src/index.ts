@@ -52,8 +52,8 @@ async function api(request: Request, env: Env, email: string) {
     const instance = body.instance || '1g';
     if (!['1g','2g'].includes(instance)) return fail('Instância inválida.');
     const id = crypto.randomUUID();
-    const label = textField(body.label, 120), notes = textField(body.notes, 4000);
-    const result = await env.DB.prepare(`INSERT OR IGNORE INTO processes(id,number,tribunal,instance,label,notes,created_by) VALUES (?,?,?,?,?,?,?)`).bind(id, number, tribunal, instance, label, notes, email).run();
+    const label = textField(body.label, 120), notes = textField(body.notes, 4000), locality = textField(body.locality, 120);
+    const result = await env.DB.prepare(`INSERT OR IGNORE INTO processes(id,number,tribunal,instance,label,notes,locality,created_by) VALUES (?,?,?,?,?,?,?,?)`).bind(id, number, tribunal, instance, label, notes, locality, email).run();
     if (!result.meta.changes) return fail('Este processo já está cadastrado nesta instância.', 409);
     return json({ id }, 201);
   }
@@ -77,7 +77,8 @@ async function api(request: Request, env: Env, email: string) {
       if (body.active !== undefined && typeof body.active !== 'boolean') return fail('Estado inválido.');
       const label = body.label === undefined ? process.label : textField(body.label, 120);
       const notes = body.notes === undefined ? process.notes : textField(body.notes, 4000);
-      await env.DB.prepare('UPDATE processes SET label=?,notes=?,active=? WHERE id=?').bind(label, notes, body.active === undefined ? process.active : body.active ? 1 : 0, id).run();
+      const locality = body.locality === undefined ? process.locality : textField(body.locality, 120);
+      await env.DB.prepare('UPDATE processes SET label=?,notes=?,locality=?,active=? WHERE id=?').bind(label, notes, locality, body.active === undefined ? process.active : body.active ? 1 : 0, id).run();
       return json({ ok: true });
     }
     if (request.method === 'DELETE' && !action) {

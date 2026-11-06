@@ -10,6 +10,7 @@ Acompanhamento privado de processos judiciais em Cloudflare Workers, com banco C
 - Máscara CNJ durante a digitação e colagem, com preservação de zeros iniciais e teclado numérico no celular.
 - Carteira compartilhada entre os usuários autorizados no Cloudflare Access.
 - Filtros por tribunal, identificação, status e avisos não lidos.
+- Lista simples dos processos cadastrados, organizada por UF e comarca, sem andamentos, com cópia em texto para compartilhamento.
 - Consulta direta ao tribunal, histórico paginado e primeira consulta usada como referência inicial.
 - Notificações para movimentos encontrados após o histórico inicial, com leitura individual por usuário.
 - Pausa, retomada, edição e exclusão do acompanhamento.
@@ -62,6 +63,14 @@ pnpm build
 ```
 
 Os testes usam números e movimentos sintéticos, verificam autenticação, protocolo MNI, histórico inicial, novos avisos, concorrência e cascatas do banco. Não consultam processos reais.
+
+## Lista simples de processos
+
+Na carteira, alterne entre **Acompanhamento** e **Lista simples**. A lista simples reúne os processos cadastrados, inclusive os pausados ou com integração pendente, com UF, comarca/localidade, número CNJ e identificação. Os filtros de busca e tribunal continuam disponíveis; o filtro de status aplica-se apenas ao acompanhamento.
+
+Preencha **Comarca / localidade** ao adicionar ou editar um processo. Esse campo é informado pela equipe e não é inferido pelo número CNJ. Os cadastros existentes continuam disponíveis e aparecem como **Comarca não informada** até receberem esse dado.
+
+Use **Copiar lista** para copiar os processos exibidos, respeitando os filtros, em blocos com UF, comarca e número. Entradas de 2º grau incluem a instância para distingui-las. O texto copiado não inclui andamentos, erros de consulta, identificação interna nem observações. Se o navegador impedir a cópia automática, o texto fica disponível para seleção manual.
 
 ## Implantação na Cloudflare
 

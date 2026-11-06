@@ -10,7 +10,7 @@ export interface Env {
 }
 
 export interface ProcessRow {
-  id: string; number: string; tribunal: string; instance: string; label: string; notes: string;
+  id: string; number: string; tribunal: string; instance: string; label: string; notes: string; locality: string;
   active: number; initialized: number; checked_at: string | null;
   source_updated_at: string | null; last_error: string | null;
   lease_token: string | null;

@@ -1,0 +1,1 @@
+ALTER TABLE processes ADD COLUMN locality TEXT NOT NULL DEFAULT '';

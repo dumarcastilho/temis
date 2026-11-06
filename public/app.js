@@ -1,6 +1,8 @@
 import { bindCnjMask } from './cnj-mask.js';
+import { processState, sortProcessList, processListText } from './process-list.js';
 const $ = selector => document.querySelector(selector);
-const state = { processes: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes' };
+const state = { processes: [], visibleProcesses: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes', processView: 'tracking' };
+try { if (localStorage.getItem('temis.processView') === 'simple') state.processView = 'simple'; } catch {}
 const format = n => n.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
 const date = value => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date(value)) : 'Ainda não consultado';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
@@ -18,8 +20,24 @@ async function busy(button, task) { button.disabled = true; try { return await t
 function configured(p) { return state.session?.courts.find(c => c.id === p.tribunal)?.instances.find(i => i.instance === p.instance)?.configured; }
 function status(p) { return !p.active ? ['paused', 'Pausado'] : p.last_error ? ['error','Precisa de atenção'] : !configured(p) ? ['error','Integração pendente'] : !p.initialized ? ['paused','Primeira consulta pendente'] : ['ok','Em acompanhamento']; }
 function render() {
-  const query = $('#search').value.toLowerCase().trim(), court = $('#court-filter').value, filter = $('#status-filter').value;
-  const rows = state.processes.filter(p => (!query || `${p.number} ${format(p.number)} ${p.label}`.toLowerCase().includes(query)) && (!court || p.tribunal === court) && (!filter || filter === 'active' && p.active || filter === 'paused' && !p.active || filter === 'error' && (p.last_error || !configured(p)) || filter === 'unread' && p.unread));
+  const simple = state.processView === 'simple';
+  const query = $('#search').value.toLowerCase().trim(), court = $('#court-filter').value, filter = simple ? '' : $('#status-filter').value;
+  const filtered = state.processes.filter(p => (!query || `${p.number} ${format(p.number)} ${p.label} ${p.locality || ''}`.toLowerCase().includes(query)) && (!court || p.tribunal === court) && (!filter || filter === 'active' && p.active || filter === 'paused' && !p.active || filter === 'error' && (p.last_error || !configured(p)) || filter === 'unread' && p.unread));
+  const rows = simple ? sortProcessList(filtered) : filtered;
+  state.visibleProcesses = rows;
+  $('#processes-view').classList.toggle('simple-mode', simple);
+  $('#processes-title').innerHTML = simple ? 'Processos cadastrados<span>.</span>' : 'Seus processos, em dia<span>.</span>';
+  $('#processes-subtitle').textContent = simple ? 'Sua lista de processos por estado e comarca, pronta para consultar e copiar.' : 'Acompanhe movimentações e mantenha tudo em um só lugar.';
+  $('#processes-view .stats').hidden = simple;
+  $('#processes-view .info-note').hidden = simple;
+  $('#status-filter').hidden = simple;
+  $('#copy-list').hidden = !simple;
+  $('#copy-list').disabled = !rows.length;
+  $('#portfolio-name').textContent = simple ? 'Lista de processos' : 'Carteira de processos';
+  $('#portfolio-description').textContent = simple ? 'UF, comarca e número dos processos cadastrados.' : 'As atualizações mais importantes, perto de você.';
+  $('#list-source-note').textContent = simple ? 'Organizada por UF e comarca' : 'Consulta direta aos tribunais';
+  document.querySelectorAll('[data-process-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.processView === state.processView)));
+  $('#process-table-head').innerHTML = simple ? '<tr><th>UF</th><th>COMARCA / LOCALIDADE</th><th>PROCESSO / IDENTIFICAÇÃO</th><th><span class="sr-only">Ações</span></th></tr>' : '<tr><th>PROCESSO / IDENTIFICAÇÃO</th><th>TRIBUNAL</th><th>ÚLTIMA MOVIMENTAÇÃO</th><th>ACOMPANHAMENTO</th><th><span class="sr-only">Ações</span></th></tr>';
   $('#total-stat').textContent = $('#nav-count').textContent = state.processes.length;
   $('#active-stat').textContent = state.processes.filter(p => p.active).length;
   $('#unread-stat').textContent = $('#nav-unread').textContent = state.processes.reduce((sum,p) => sum + p.unread, 0);
@@ -28,7 +46,11 @@ function render() {
   $('#empty-state').hidden = !!rows.length;
   $('#empty-state h3').textContent = state.processes.length ? 'Nenhum processo neste filtro' : 'Sua carteira começa aqui';
   $('#empty-add').hidden = !!state.processes.length;
-  $('#empty-state p').textContent = state.processes.length ? 'Tente outro número, tribunal ou status.' : 'Adicione um número de processo para organizar o histórico e acompanhar novas movimentações.';
+  $('#empty-state p').textContent = state.processes.length ? 'Tente outro número, comarca ou tribunal.' : simple ? 'Adicione seus processos para organizar a lista por estado e comarca.' : 'Adicione um número de processo para organizar o histórico e acompanhar novas movimentações.';
+  if (simple) {
+    $('#process-list').innerHTML = rows.map(p => `<tr><td><span class="court-tag">${esc(processState(p))}</span></td><td class="simple-locality">${esc(p.locality || 'Comarca não informada')}</td><td><span class="simple-process-number">${esc(format(p.number))}</span><span class="process-label">${esc(p.label || '')}${p.label ? ' · ' : ''}${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><button class="button secondary simple-edit" data-edit="${p.id}" aria-label="Editar ${esc(format(p.number))}">Editar</button></td></tr>`).join('');
+    return;
+  }
   $('#process-list').innerHTML = rows.map(p => {
     const [className, label] = status(p);
     return `<tr><td><button class="process-title" data-detail="${p.id}">${esc(format(p.number))}${p.unread ? `<span class="new-badge">${p.unread} nova(s)</span>` : ''}</button><span class="process-label">${esc(p.label || 'Sem identificação')}</span></td><td><span class="court-tag">${esc(p.tribunal.toUpperCase())}</span><span class="timestamp">${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><span class="movement-summary">${esc(p.latest_movement || 'Aguardando primeira consulta')}</span><span class="timestamp">${p.latest_movement_at ? esc(date(p.latest_movement_at)) : '—'}</span></td><td><span class="status ${className}">${label}</span><span class="timestamp">${p.checked_at ? 'Verificado ' + esc(date(p.checked_at)) : 'Sem consulta confirmada'}</span></td><td><button class="row-arrow" data-detail="${p.id}" aria-label="Ver histórico de ${esc(format(p.number))}">›</button></td></tr>`;
@@ -48,6 +70,7 @@ function openForm(process) {
   $('#number').value = process ? format(process.number) : ''; $('#number').disabled = !!process;
   $('#instance').value = process?.instance || '1g'; $('#instance').disabled = !!process;
   $('#label').value = process?.label || ''; $('#notes').value = process?.notes || '';
+  $('#locality').value = process?.locality || '';
   $('#process-dialog').showModal();
 }
 async function showDetail(id) {
@@ -85,13 +108,26 @@ function renderCourts() {
 async function handleClick(event) {
   const button = event.target.closest('button'); if (!button) return;
   if (button.dataset.view) return setView(button.dataset.view);
+  if (button.dataset.processView) {
+    state.processView = button.dataset.processView;
+    try { localStorage.setItem('temis.processView', state.processView); } catch {}
+    render(); return;
+  }
   if (button.dataset.close) return $(`#${button.dataset.close}`).close();
   if (button.dataset.detail) return showDetail(button.dataset.detail);
+  if (button.dataset.edit) return openForm(state.processes.find(p => p.id === button.dataset.edit));
   if (button.dataset.read) return busy(button, async () => { await api(`/notifications/${button.dataset.read}/read`, 'POST'); await refresh(); const page = state.notificationPage; state.notificationPage = 0; await loadNotifications(false); for(let i=1;i<=page;i++){state.notificationPage=i;await loadNotifications(true);} });
   const p = state.processes.find(p => p.id === state.selected);
   switch(button.id) {
     case 'new-process': case 'empty-add': return openForm();
     case 'refresh': return busy(button, async () => { await refresh(); toast('Lista atualizada.'); });
+    case 'copy-list': {
+      const text = processListText(state.visibleProcesses);
+      if (!text) return;
+      try { await navigator.clipboard.writeText(text); toast('Lista copiada.'); }
+      catch { $('#copy-text').value = text; $('#copy-dialog').showModal(); $('#copy-text').select(); }
+      return;
+    }
     case 'check-process': return busy(button, async () => { const result = await api(`/processes/${p.id}/check`, 'POST'); await refresh(); await showDetail(p.id); toast(result.added ? `${result.added} movimentação(ões) encontrada(s).` : 'Consulta concluída. Histórico atualizado.'); });
     case 'edit-process': return openForm(p);
     case 'toggle-process': return busy(button, async () => { await api(`/processes/${p.id}`, 'PATCH', {active:!p.active}); await refresh(); await showDetail(p.id); });
@@ -107,14 +143,15 @@ $('#process-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#form-error').textContent = '';
   try { await busy($('#save-process'), async () => {
     const id = $('#edit-id').value;
-    const payload = {number:$('#number').value, instance:$('#instance').value, label:$('#label').value, notes:$('#notes').value};
+    const payload = {number:$('#number').value, instance:$('#instance').value, label:$('#label').value, notes:$('#notes').value, locality:$('#locality').value};
     const saved = await api(id ? `/processes/${id}` : '/processes', id ? 'PATCH' : 'POST', payload);
-    $('#process-dialog').close(); await refresh(); const selected = id || saved.id; await showDetail(selected);
-    toast(id ? 'Processo atualizado.' : 'Processo salvo. Preparando a primeira consulta.');
+    $('#process-dialog').close(); await refresh(); const selected = id || saved.id;
+    if (state.processView !== 'simple') await showDetail(selected);
+    toast(id ? 'Processo atualizado.' : 'Processo salvo.');
     if (!id && configured(state.processes.find(p => p.id === selected))) {
       await busy($('#check-process'), async () => { await api(`/processes/${selected}/check`,'POST'); await refresh(); if(state.selected===selected && $('#detail-dialog').open) await showDetail(selected); });
     }
-  }); } catch(e) { if ($('#process-dialog').open) $('#form-error').textContent = e.message; else { $('#detail-error').textContent=e.message;$('#detail-error').hidden=false; await refresh().catch(()=>{}); } }
+  }); } catch(e) { if ($('#process-dialog').open) $('#form-error').textContent = e.message; else { error(e.message); if ($('#detail-dialog').open) { $('#detail-error').textContent=e.message;$('#detail-error').hidden=false; } await refresh().catch(()=>{}); } }
 });
 async function start() {
   try {

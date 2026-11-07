@@ -13,7 +13,7 @@ function database() {
   const prepare=sql=>({bind(...args){return {async first(){return db.prepare(sql).get(...args)||null;},async all(){return {results:db.prepare(sql).all(...args)};},async run(){const r=db.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}};}};}});
   return {db, binding:{prepare,async batch(statements){db.exec('BEGIN');try{const result=[];for(const s of statements)result.push(await s.run());db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}}};
 }
-const schema = (await Promise.all(['0001_initial.sql','0002_process_locality.sql','0003_history_sources.sql'].map(name => readFile(new URL('../migrations/' + name, import.meta.url), 'utf8')))).join('\n');
+const schema = (await Promise.all(['0001_initial.sql','0002_process_locality.sql','0003_history_sources.sql','0004_process_information.sql'].map(name => readFile(new URL('../migrations/' + name, import.meta.url), 'utf8')))).join('\n');
 function fixture() {
   const {db,binding}=database(); db.exec(schema);
   db.prepare('INSERT INTO processes(id,number,tribunal,instance,created_by) VALUES (?,?,?,?,?)').run('synthetic-process',number,'tjmt','1g','one@example.invalid');

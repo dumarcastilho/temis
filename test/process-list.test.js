@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { processState, processListText, sortProcessList, formatLocality, processTrackingStatus, sortTrackingProcesses } from '../public/process-list.js';
+import { processState, processListText, sortProcessList, formatLocality, processTrackingStatus, sortTrackingProcesses, groupProcessesByCourt } from '../public/process-list.js';
 
 const rows = [
   { number: '99999990020998209999', tribunal: 'tjrn', locality: 'Comarca B', instance: '1g', active: 0, last_error: 'Erro que não deve constar na lista', latest_movement: 'Andamento que não deve constar na lista' },
@@ -57,4 +57,10 @@ test('simple lists identify the Federal District and regional courts without inv
   assert.equal(processState({ tribunal: 'tjdft' }), 'DF');
   assert.equal(processState({ tribunal: 'trf1' }), 'TRF1');
   assert.equal(processState({ tribunal: 'trt15' }), 'TRT15');
+});
+
+test('court grouping preserves the filtered status order inside each court and does not alter the input',()=>{
+ const rows=[{tribunal:'tjpe',id:'attention'},{tribunal:'tjgo',id:'other'},{tribunal:'tjpe',id:'monitored'}];
+ assert.deepEqual(groupProcessesByCourt(rows),[{tribunal:'tjgo',items:[rows[1]]},{tribunal:'tjpe',items:[rows[0],rows[2]]}]);
+ assert.deepEqual(rows.map(p=>p.id),['attention','other','monitored']);assert.deepEqual(groupProcessesByCourt([]),[]);
 });

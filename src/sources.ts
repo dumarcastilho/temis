@@ -4,9 +4,10 @@ import { envelope, parseMniProcess, soapXml, SourceError } from './mni.js';
 import { parseGoProcess, parseGoMovements } from './projudi.js';
 import { boundedResponse } from './source-http';
 import { queryDatajud, datajudEnabled } from './datajud';
+import { filedDate, namedCode, type CaseInformation } from './information-types';
 
 export interface Movement { key: string; date: string; description: string }
-export interface ProcessResult { movements: Movement[]; locality: string; source?: 'direct' | 'datajud'; sourceUpdatedAt?: string | null; fallbackReason?: string }
+export interface ProcessResult { movements: Movement[]; locality: string; source?: 'direct' | 'datajud'; sourceUpdatedAt?: string | null; fallbackReason?: string; information?: CaseInformation }
 const TJMT = 'https://hellsgate.tjmt.jus.br/consultaprocessual/ProcessosJudiciais';
 const municipalityCache = new Map<string, { name: string; expires: number }>();
 const cleanLocality = (value: unknown): string => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) : '';
@@ -50,6 +51,7 @@ export async function queryTjmtProcess(number: string, instance: string): Promis
   if (!matches.length) throw new SourceError('Processo não localizado nesta instância do TJMT.');
   const movements: Movement[] = [];
   const seen = new Set<string>();
+  let information: CaseInformation | undefined;
   const localities: { name: string; archived: boolean; latest: number }[] = [];
   for (const record of matches) {
     const code = String(record.codigoProcessoStr || '');
@@ -58,6 +60,7 @@ export async function queryTjmtProcess(number: string, instance: string): Promis
     const detail = await getJson(`${TJMT}/${number}/${code}`);
     if (detail.segredo) throw new SourceError('TJMT informou que o processo não permite consulta pública.', false);
     if (detail.numeroUnico !== number || !Array.isArray(detail.eventos)) throw new SourceError('TJMT não retornou histórico público válido.');
+    if (!information || !detail.arquivado) information = { caseClass: namedCode(detail.classeJudicial || detail.classe), subjects: Array.isArray(detail.assuntos) ? detail.assuntos.slice(0,100).map(namedCode).filter(Boolean) : [], courtUnit: namedCode(detail.orgaoJulgador), filedAt: filedDate(detail.dataDistribuicao || detail.dataAutuacao) };
     const name = cleanLocality(detail.jurisdicao?.nome) || cleanLocality(detail.localidade?.descricao) || cleanLocality(record.jurisdicao?.nome);
     if (name) localities.push({ name, archived: !!(detail.arquivado ?? record.arquivado), latest: detail.eventos.reduce((latest: number, e: any) => Math.max(latest, Date.parse(e?.data) || 0), 0) });
     for (const event of detail.eventos) {
@@ -70,7 +73,7 @@ export async function queryTjmtProcess(number: string, instance: string): Promis
   }
   if (!seen.size) throw new SourceError('TJMT não retornou identificadores válidos.');
   localities.sort((a, b) => Number(a.archived) - Number(b.archived) || b.latest - a.latest);
-  return { movements, locality: localities[0]?.name || '' };
+  return { movements, locality: localities[0]?.name || '', information };
 }
 
 export async function queryTjmt(number: string, instance: string): Promise<Movement[]> {
@@ -107,7 +110,7 @@ export async function queryDirectProcess(process: ProcessRow, env: Env): Promise
   const xml = soapXml(await boundedResponse(response), response.headers.get('content-type') || '');
   const result = parseMniProcess(xml, process.number, courts.find(c => c.id === process.tribunal)?.offset || '-03:00');
   const locality = !process.locality?.trim() && result.municipalityCode ? await municipalityName(result.municipalityCode) : '';
-  return { movements: result.movements, locality };
+  return { movements: result.movements, locality, information: result.information };
 }
 
 export async function queryProcess(process: ProcessRow, env: Env): Promise<ProcessResult> {
@@ -116,7 +119,7 @@ export async function queryProcess(process: ProcessRow, env: Env): Promise<Proce
     if (!datajudEnabled(env) || error instanceof SourceError && !error.allowFallback) throw error;
     const result = await queryDatajud(process, env);
     const locality = !process.locality?.trim() && result.municipalityCode ? await municipalityName(result.municipalityCode) : '';
-    return { movements: result.movements, locality, source: 'datajud', sourceUpdatedAt: result.updatedAt, fallbackReason: error instanceof SourceError ? error.message.slice(0, 800) : 'Consulta direta indisponível.' };
+    return { movements: result.movements, locality, source: 'datajud', sourceUpdatedAt: result.updatedAt, fallbackReason: error instanceof SourceError ? error.message.slice(0, 800) : 'Consulta direta indisponível.', information: result.information };
   }
 }
 

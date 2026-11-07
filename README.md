@@ -9,11 +9,14 @@ Acompanhamento privado de processos judiciais em Cloudflare Workers, com banco C
 - Cadastro de número CNJ com validação do dígito verificador, identificação, observações e instância.
 - Máscara CNJ durante a digitação e colagem, com preservação de zeros iniciais e teclado numérico no celular.
 - Carteira compartilhada entre os usuários autorizados no Cloudflare Access.
+- Agrupamento por tribunal nas duas visualizações da carteira, com opção sem agrupamento e preferência salva no navegador. O acompanhamento mantém a prioridade dos status dentro de cada tribunal.
 - Filtros por tribunal, identificação, status e avisos não lidos.
 - Acompanhamento ordenado por prioridade: atenção e integração pendente, primeira consulta pendente, em acompanhamento e pausados; a ordem anterior é preservada dentro de cada grupo.
 - Catálogo nacional com 27 TJs, 6 TRFs e 24 TRTs, identificação pelo CNJ e busca de tribunais por ramo e disponibilidade.
 - Lista simples dos processos cadastrados, organizada por UF ou região e comarca, sem andamentos, com cópia em texto para compartilhamento.
 - Consulta direta ao tribunal, histórico paginado e primeira consulta usada como referência inicial.
+- Dados complementares por fonte: classe, assuntos, órgão julgador, ajuizamento, sistema e formato, quando informados pelo tribunal ou DataJud.
+- Publicações públicas do DJEN no detalhe do processo, com texto, destinatários e link oficial quando disponíveis.
 - Notificações para movimentos encontrados após o histórico inicial, com leitura individual por usuário.
 - Pausa, retomada, edição e exclusão do acompanhamento.
 - Verificações agendadas, identificação de falhas, controle de concorrência e deduplicação.
@@ -42,13 +45,25 @@ A identificação por TRF representa a região da Justiça Federal de origem. Os
 
 A tela **Tribunais** distingue consulta direta, alternativa DataJud, primeira consulta pendente e falha de consulta. A configuração direta e seu eventual credenciamento são independentes da alternativa DataJud. A confirmação depende de um processo com histórico consultado com sucesso e sem erro registrado na carteira. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML simples ou envelope XML em multipart/related (MTOM), movimentos nacionais/locais e credenciais opcionais no envelope. Anexos MIME são ignorados e partes incompletas ou não reconhecidas são rejeitadas; adaptações de contrato podem ser necessárias em cada instalação.
 
-O número CNJ identifica o tribunal, mas não necessariamente a instância atual. Cadastre 1º e 2º graus separadamente quando necessário. O produto trabalha com processos e movimentações públicos. Não baixa documentos, não abre intimações e não contorna CAPTCHA, MFA ou restrições do tribunal. Regras de acesso por IP fixo ou certificado cliente exigem infraestrutura e implementação adicional.
+O número CNJ identifica o tribunal, mas não necessariamente a instância atual. Cadastre 1º e 2º graus separadamente quando necessário. O produto trabalha com informações públicas. As publicações do DJEN são consultadas em seu serviço público; o Temis não acessa caixas pessoais de intimação nem baixa documentos anexos. Não contorna CAPTCHA, MFA ou restrições do tribunal. Regras de acesso por IP fixo ou certificado cliente exigem infraestrutura e implementação adicional.
+
+## Dados do processo e publicações
+
+O detalhe separa **Movimentações**, **Dados do processo** e **Publicações DJEN**. Os dados retornados pelo tribunal são salvos nas consultas de movimentação compatíveis. Ao abrir a aba de dados, o Temis também consulta os metadados da API Pública do DataJud, sem substituir o histórico direto. Os resultados de cada fonte permanecem separados, com data de consulta e atualização da base quando disponível. A disponibilidade dos campos varia conforme o serviço; informação ausente não é deduzida.
+
+Classes e assuntos nacionais retornados pelo MNI são identificados pelas tabelas oficiais TPU/CNJ. O DataJud fornece os nomes dos seus próprios metadados. Para atualizar as tabelas de movimentos, classes e assuntos, execute `node scripts/update-tpu.mjs` e revise os arquivos `src/tpu-movements.json` e `src/tpu-case-information.json`.
+
+As publicações vêm do [serviço público do DJEN/CNJ](https://comunicaapi.pje.jus.br/swagger/index.html), filtradas pelo número CNJ e tribunal. A consulta cobre os últimos 365 dias, lê até duas páginas de 100 registros e exibe até 50 publicações, respeitando o limite de armazenamento. A interface informa quando o resultado foi limitado. Textos extensos são resumidos em até 12 mil caracteres; o link oficial permite acessar o conteúdo integral quando fornecido pela fonte. Publicações inativas são identificadas. Esse conjunto complementa o histórico, mas não representa todos os andamentos do processo nem garante cobertura de todos os sistemas do tribunal.
+
+As fontes complementares são consultadas ao abrir suas abas quando o cache de seis horas expira, e podem ser atualizadas pelos respectivos botões. Há intervalo mínimo de um minuto para atualização manual, controle de concorrência e espera após falhas ou limitação da fonte. Falhas preservam a última informação salva. O DJEN usa seus endpoints públicos, sem credenciais MNI. As publicações não são verificadas pelo agendador nem geram avisos próprios nesta versão; as notificações continuam vinculadas às movimentações. Consultar dados complementares não muda a fonte ativa do histórico nem cria avisos retroativos.
+
+A migração `0004_process_information.sql` cria o armazenamento dessas informações no D1 e é aplicada automaticamente pelo comando `deploy:ci`. Excluir um processo também remove seus dados complementares e publicações armazenadas.
 
 ## Nomes das movimentações e links oficiais
 
 Quando o MNI retorna um código nacional sem descrição, o Temis resolve o nome pela tabela oficial TPU/CNJ incluída na aplicação. Descrições fornecidas pelo tribunal e complementos são preservados; códigos locais não são confundidos com códigos nacionais. A próxima consulta atualiza os nomes já salvos sem recriar os movimentos ou seus avisos.
 
-A tabela é obtida do [serviço público TPU/CNJ](https://gateway.cloud.pje.jus.br/tpu/api/v1/publico/download/movimentos). Para atualizá-la, execute `node scripts/update-tpu.mjs` e revise a alteração em `src/tpu-movements.json`. Ela contém somente códigos e nomes públicos da taxonomia, sem dados de processos.
+A tabela é obtida do [serviço público TPU/CNJ](https://gateway.cloud.pje.jus.br/tpu/api/v1/publico/download/movimentos). As tabelas incluídas contêm somente códigos e nomes públicos da taxonomia, sem dados de processos.
 
 **Abrir tribunal** abre outra aba. O TJMT aceita o número no link de consulta. Páginas públicas PJe e Projudi recebem o número na URL de pesquisa quando esse formato é conhecido; isso não substitui CAPTCHA, identificadores assinados ou pesquisa exigida pelo portal. Portais como o TJPE podem exigir um identificador específico e CAPTCHA para abrir o detalhe; passar apenas o número não garante a abertura automática. O número é copiado ao abrir, se o navegador permitir; o botão **Copiar número** oferece uma alternativa.
 

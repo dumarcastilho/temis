@@ -29,6 +29,15 @@ export function sortTrackingProcesses(processes, isConfigured) {
     processTrackingStatus(a, !!isConfigured(a))[2] - processTrackingStatus(b, !!isConfigured(b))[2]);
 }
 
+export function groupProcessesByCourt(processes) {
+  const groups = new Map();
+  for (const process of processes) {
+    if (!groups.has(process.tribunal)) groups.set(process.tribunal, []);
+    groups.get(process.tribunal).push(process);
+  }
+  return [...groups].sort(([a], [b]) => collator.compare(a, b)).map(([tribunal, items]) => ({ tribunal, items }));
+}
+
 export function processListText(processes) {
   return sortProcessList(processes).map(p => [
     processState(p),

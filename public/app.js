@@ -1,9 +1,11 @@
 import { bindCnjMask } from './cnj-mask.js';
 import { courtProcessLink } from './court-link.js';
-import { processState, sortProcessList, processListText, formatLocality, processTrackingStatus, sortTrackingProcesses } from './process-list.js';
+import { informationHtml, publicationsHtml } from './process-information.js';
+import { processState, sortProcessList, processListText, formatLocality, processTrackingStatus, sortTrackingProcesses, groupProcessesByCourt } from './process-list.js';
 const $ = selector => document.querySelector(selector);
-const state = { processes: [], visibleProcesses: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes', processView: 'tracking' };
+const state = { processes: [], visibleProcesses: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes', processView: 'tracking', grouping: 'court', detailTab: 'movements', information: {}, informationLoading: new Set() };
 try { if (localStorage.getItem('temis.processView') === 'simple') state.processView = 'simple'; } catch {}
+try { if (localStorage.getItem('temis.processGrouping') === 'none') state.grouping = 'none'; } catch {}
 const format = n => n.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
 const sourceName = p => p.last_source === 'datajud' ? 'DataJud' : 'Tribunal';
 const sourceNote = p => p.last_source === 'datajud' ? `DataJud · atualização da base: ${p.source_updated_at ? date(p.source_updated_at) : 'não informada'}` : 'Consulta direta';
@@ -28,6 +30,7 @@ function render() {
   const filtered = state.processes.filter(p => (!query || `${p.number} ${format(p.number)} ${p.label} ${p.locality || ''}`.toLowerCase().includes(query)) && (!court || p.tribunal === court) && (!filter || filter === 'active' && p.active || filter === 'paused' && !p.active || filter === 'error' && (p.last_error || !configured(p)) || filter === 'unread' && p.unread));
   const rows = simple ? sortProcessList(filtered) : sortTrackingProcesses(filtered, configured);
   state.visibleProcesses = rows;
+  $('#process-grouping').value = state.grouping;
   $('#processes-view').classList.toggle('simple-mode', simple);
   $('#processes-title').innerHTML = simple ? 'Processos cadastrados<span>.</span>' : 'Seus processos, em dia<span>.</span>';
   $('#processes-subtitle').textContent = simple ? 'Sua lista de processos por estado ou região e comarca, pronta para consultar e copiar.' : 'Acompanhe movimentações e mantenha tudo em um só lugar.';
@@ -51,12 +54,19 @@ function render() {
   $('#empty-add').hidden = !!state.processes.length;
   $('#empty-state p').textContent = state.processes.length ? 'Tente outro número, comarca ou tribunal.' : simple ? 'Adicione seus processos para organizar a lista por estado e comarca.' : 'Adicione um número de processo para organizar o histórico e acompanhar novas movimentações.';
   if (simple) {
-    $('#process-list').innerHTML = rows.map(p => `<tr><td><span class="court-tag">${esc(processState(p))}</span></td><td class="simple-locality">${esc(formatLocality(p.locality) || 'Comarca não informada')}</td><td><span class="simple-process-number">${esc(format(p.number))}</span><span class="process-label">${esc(p.label || '')}${p.label ? ' · ' : ''}${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><button class="button secondary simple-edit" data-edit="${p.id}" aria-label="Editar ${esc(format(p.number))}">Editar</button></td></tr>`).join('');
+    $('#process-list').innerHTML = renderProcessRows(rows, p => `<tr><td><span class="court-tag">${esc(processState(p))}</span></td><td class="simple-locality">${esc(formatLocality(p.locality) || 'Comarca não informada')}</td><td><span class="simple-process-number">${esc(format(p.number))}</span><span class="process-label">${esc(p.label || '')}${p.label ? ' · ' : ''}${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><button class="button secondary simple-edit" data-edit="${p.id}" aria-label="Editar ${esc(format(p.number))}">Editar</button></td></tr>`, 4);
     return;
   }
-  $('#process-list').innerHTML = rows.map(p => {
+  $('#process-list').innerHTML = renderProcessRows(rows, p => {
     const [className, label] = status(p);
     return `<tr><td><button class="process-title" data-detail="${p.id}">${esc(format(p.number))}${p.unread ? `<span class="new-badge">${p.unread} nova(s)</span>` : ''}</button><span class="process-label">${esc(p.label || 'Sem identificação')}</span></td><td><span class="court-tag">${esc(p.tribunal.toUpperCase())}</span><span class="timestamp">${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><span class="movement-summary">${esc(p.latest_movement || 'Aguardando primeira consulta')}</span><span class="timestamp">${p.latest_movement_at ? esc(date(p.latest_movement_at)) : '—'}</span></td><td><span class="status ${className}">${label}</span><span class="timestamp">${p.checked_at ? 'Verificado ' + esc(date(p.checked_at)) : 'Sem consulta confirmada'}</span>${p.checked_at ? `<span class="timestamp">${esc(sourceNote(p))}</span>` : ''}</td><td><button class="row-arrow" data-detail="${p.id}" aria-label="Ver histórico de ${esc(format(p.number))}">›</button></td></tr>`;
+  }, 5);
+}
+function renderProcessRows(rows, row, columns) {
+  if (state.grouping !== 'court') return rows.map(row).join('');
+  return groupProcessesByCourt(rows).map(group => {
+    const court = state.session.courts.find(c => c.id === group.tribunal);
+    return `<tr class="court-group"><th colspan="${columns}" scope="rowgroup">${esc(group.tribunal.toUpperCase())} · ${esc(court?.name || '')}<span class="count-pill">${group.items.length}</span></th></tr>${group.items.map(row).join('')}`;
   }).join('');
 }
 async function refresh() { state.processes = await api('/processes'); render(); if (state.view === 'courts') renderCourts(); }
@@ -79,7 +89,9 @@ function openForm(process) {
 }
 async function showDetail(id) {
   const p = state.processes.find(p => p.id === id); if (!p) return;
+  if (state.selected !== id) { state.information = {}; state.informationLoading.clear(); }
   state.selected = id; state.page = 0; $('#history-source').value = '';
+  setDetailTab('movements');
   $('#detail-title').textContent = format(p.number);
   $('#detail-meta').textContent = `${p.tribunal.toUpperCase()} · ${p.instance === '1g' ? '1º' : '2º'} grau · ${p.label || 'Sem identificação'} · Última consulta confirmada: ${date(p.checked_at)}${p.checked_at ? ' · ' + sourceName(p) : ''}`;
   $('#detail-notes').textContent = p.notes;
@@ -96,6 +108,43 @@ async function showDetail(id) {
   $('#timeline').textContent = 'Carregando histórico…';
   if (!$('#detail-dialog').open) $('#detail-dialog').showModal();
   await loadMovements(false);
+}
+function renderInformation() {
+  $('#case-information').innerHTML = informationHtml(state.information);
+  $('#case-publications').innerHTML = publicationsHtml(state.information.djen);
+  $('#information-loading').hidden = !state.informationLoading.has('datajud');
+  $('#publications-loading').hidden = !state.informationLoading.has('djen');
+  document.querySelectorAll('[data-refresh-information]').forEach(button => button.disabled = state.informationLoading.has(button.dataset.refreshInformation));
+}
+function mergeInformation(row) {
+  if (!row) return;
+  const previous = state.information[row.provider];
+  if (!previous || !previous.checkedAt || !row.checkedAt || row.checkedAt >= previous.checkedAt) state.information[row.provider] = row;
+}
+async function updateInformation(source, manual = false) {
+  const id = state.selected;
+  if (!id || state.informationLoading.has(source)) return;
+  state.informationLoading.add(source); renderInformation();
+  try {
+    const result = await api(`/processes/${id}/information/refresh`, 'POST', {source,manual});
+    if (id !== state.selected) return;
+    mergeInformation(result.information);
+  } catch (e) { if (id === state.selected) error(e.message); }
+  finally { if (id === state.selected) { state.informationLoading.delete(source); renderInformation(); } }
+}
+async function loadInformation(source) {
+  const id = state.selected;
+  const result = await api(`/processes/${id}/information`);
+  if (id !== state.selected) return;
+  for (const row of result.sources) mergeInformation(row);
+  renderInformation();
+  if (!state.information[source] || state.information[source].stale) await updateInformation(source);
+}
+function setDetailTab(tab) {
+  state.detailTab = tab;
+  for (const name of ['movements','information','publications']) $(`#${name}-pane`).hidden = name !== tab;
+  document.querySelectorAll('[data-detail-tab]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.detailTab === tab)));
+  if (tab !== 'movements') { renderInformation(); loadInformation(tab === 'publications' ? 'djen' : 'datajud').catch(e=>error(e.message)); }
 }
 async function loadMovements(append) {
   const id = state.selected;
@@ -138,6 +187,8 @@ function renderCourts() {
 async function handleClick(event) {
   const button = event.target.closest('button'); if (!button) return;
   if (button.dataset.view) return setView(button.dataset.view);
+  if (button.dataset.detailTab) return setDetailTab(button.dataset.detailTab);
+  if (button.dataset.refreshInformation) return updateInformation(button.dataset.refreshInformation,true);
   if (button.id === 'copy-process-number') {
     const p = state.processes.find(p => p.id === state.selected); if (!p) return;
     try { await navigator.clipboard.writeText(format(p.number)); toast('Número do processo copiado.'); }
@@ -179,6 +230,7 @@ $('#source-link').addEventListener('click', () => {
   const p = state.processes.find(p => p.id === state.selected); if (!p) return;
   navigator.clipboard?.writeText(format(p.number)).then(() => toast('Número do processo copiado.')).catch(() => {});
 });
+$('#process-grouping').addEventListener('change', () => { state.grouping = $('#process-grouping').value; try { localStorage.setItem('temis.processGrouping', state.grouping); } catch {} render(); });
 for (const selector of ['#search','#court-filter','#status-filter']) $(selector).addEventListener('input', render);
 for (const selector of ['#court-search','#court-branch','#court-availability']) $(selector).addEventListener('input', renderCourts);
 $('#process-form').addEventListener('submit', async event => {

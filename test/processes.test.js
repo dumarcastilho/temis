@@ -21,6 +21,38 @@ async function request(env, path, method = 'GET', body) {
   return worker.fetch(new Request('http://localhost' + path, { method, headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }), env);
 }
 
+test('complementary information API validates source and process, caches DJEN and leaves history untouched', async () => {
+  const db = new DatabaseSync(':memory:');
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const migration of migrations) db.exec(migration);
+    const env = { DB: binding(db), LOCAL_DEV: 'true' };
+    const created = await request(env, '/api/processes', 'POST', {number:'99999992420998099999'});
+    const {id} = await created.json();
+    const base = `/api/processes/${id}/information`;
+    assert.deepEqual(await (await request(env, base)).json(), {sources:[]});
+    assert.equal((await request(env, base + '/refresh', 'POST', {source:'direct'})).status, 400);
+    assert.equal((await request(env, base + '/refresh', 'POST', {source:'djen',manual:'true'})).status, 400);
+    assert.equal((await request(env, base, 'POST')).status, 405);
+    assert.equal((await request({...env,DATAJUD_ENABLED:'false'}, base + '/refresh', 'POST', {source:'datajud'})).status, 409);
+    assert.equal((await request(env, '/api/processes/00000000-0000-4000-8000-000000000000/information')).status, 404);
+    let calls = 0;
+    globalThis.fetch = async url => { calls++; assert.equal(new URL(url).hostname, 'comunicaapi.pje.jus.br'); return Response.json({status:'success',count:0,items:[]}); };
+    const first = await (await request(env, base + '/refresh', 'POST', {source:'djen'})).json();
+    assert.equal(first.status, 'ok');
+    assert.equal(first.information.provider, 'djen');
+    assert.deepEqual(first.information.data.publications, []);
+    assert.equal((await (await request(env, base + '/refresh', 'POST', {source:'djen'})).json()).status, 'cached');
+    assert.equal(calls, 1);
+    const cached = await (await request(env, base)).json();
+    assert.ok(!JSON.stringify(cached).includes('lease_token'));
+    assert.equal(cached.sources.length, 1);
+    assert.equal(db.prepare('SELECT count(*) n FROM movements').get().n, 0);
+    assert.equal(db.prepare('SELECT count(*) n FROM notifications').get().n, 0);
+    assert.equal(db.prepare('SELECT initialized FROM processes').get().initialized, 0);
+  } finally { globalThis.fetch = originalFetch; db.close(); }
+});
+
 test('court availability enables new first-instance connectors without enabling unvalidated second-instance services', async () => {
   const response = await request({ LOCAL_DEV: 'true' }, '/api/session');
   assert.equal(response.status, 200);

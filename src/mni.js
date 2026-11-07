@@ -1,5 +1,6 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import tpu from './tpu-movements.json' with { type: 'json' };
+import caseTpu from './tpu-case-information.json' with { type: 'json' };
 
 export class SourceError extends Error {
   constructor(message, allowFallback = true) { super(message); this.allowFallback = allowFallback; }
@@ -102,7 +103,20 @@ export function parseMniProcess(xml, number, offset = '-03:00') {
     // Preserve the previous identity so label enrichment does not create duplicate alerts.
     return { key: JSON.stringify([m['@_identificadorMovimento'] || '', date, code, legacyDescription]), date: new Date(date).toISOString(), description: description.slice(0, 4000) };
   });
-  return { movements, municipalityCode };
+  const basics = process.dadosBasicos;
+  const classCode = String(basics['@_classeProcessual'] || '');
+  const subjects = list(basics.assunto).map(a => {
+    const code = String(a.codigoNacional || '');
+    return { code, name: caseTpu.assuntos.names[code] || '' };
+  }).filter(a => /^\d+$/.test(a.code));
+  const filed = String(basics['@_dataAjuizamento'] || '');
+  const information = {
+    caseClass: /^\d+$/.test(classCode) ? { code: classCode, name: caseTpu.classes.names[classCode] || '' } : undefined,
+    subjects: subjects.slice(0,100),
+    courtUnit: basics.orgaoJulgador ? { code: String(basics.orgaoJulgador['@_codigoOrgao'] || ''), name: String(basics.orgaoJulgador['@_nomeOrgao'] || '').slice(0,240) } : undefined,
+    filedAt: /^\d{14}$/.test(filed) ? `${filed.slice(0,4)}-${filed.slice(4,6)}-${filed.slice(6,8)}` : /^\d{4}-\d{2}-\d{2}/.test(filed) ? filed.slice(0,10) : undefined,
+  };
+  return { movements, municipalityCode, information };
 }
 
 export function parseMni(xml, number, offset = '-03:00') {

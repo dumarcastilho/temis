@@ -5,6 +5,7 @@ import { courts, connectors, hasPublicConnector, hasConnectorProfile } from './c
 import { datajudEnabled } from './datajud';
 import { normalizeNumber, tribunalFor } from './cnj.js';
 import { checkProcess, monitor } from './monitor';
+import { getInformation, refreshInformation } from './information';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const fail = (message: string, status = 400): never => { throw json({ error: message }, status); };
@@ -61,6 +62,20 @@ async function api(request: Request, env: Env, email: string) {
     const result = await env.DB.prepare(`INSERT OR IGNORE INTO processes(id,number,tribunal,instance,label,notes,locality,created_by) VALUES (?,?,?,?,?,?,?,?)`).bind(id, number, tribunal, instance, label, notes, locality, email).run();
     if (!result.meta.changes) return fail('Este processo já está cadastrado nesta instância.', 409);
     return json({ id }, 201);
+  }
+  const informationMatch = path.match(/^\/api\/processes\/([a-f0-9-]{36})\/information(?:\/(refresh))?$/);
+  if (informationMatch) {
+    const [,id,refresh]=informationMatch;
+    const process=await env.DB.prepare('SELECT * FROM processes WHERE id=?').bind(id).first<ProcessRow>();
+    if (!process) return fail('Processo não encontrado.',404);
+    if (request.method==='GET'&&!refresh) return json({sources:await getInformation(env,id)});
+    if (request.method==='POST'&&refresh) {
+      const body=await readBody(request);
+      if (!['datajud','djen'].includes(body.source)||body.manual!==undefined&&typeof body.manual!=='boolean') return fail('Fonte complementar inválida.');
+      if (body.source==='datajud'&&!datajudEnabled(env)) return fail('Consulta complementar ao DataJud desativada.',409);
+      return json(await refreshInformation(env,process,body.source,body.manual===true));
+    }
+    return fail('Método não permitido.',405);
   }
   const match = path.match(/^\/api\/processes\/([a-f0-9-]{36})(?:\/(movements|check))?$/);
   if (match) {

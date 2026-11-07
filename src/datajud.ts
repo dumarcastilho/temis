@@ -4,6 +4,7 @@ import { courtCatalog } from './court-catalog.js';
 import { SourceError } from './mni.js';
 import { boundedResponse } from './source-http';
 import tpu from './tpu-movements.json';
+import { filedDate, infoText, namedCode, type CaseInformation } from './information-types';
 
 const ACCESS = 'https://datajud-wiki.cnj.jus.br/api-publica/acesso/';
 let publicKey: { value: string; expires: number } | undefined;
@@ -40,7 +41,7 @@ const date = (value: unknown): string => {
   return new Date(s).toISOString();
 };
 
-export async function queryDatajud(process: ProcessRow, env: Env): Promise<{ movements: Movement[]; municipalityCode: string; updatedAt: string | null }> {
+export async function queryDatajud(process: ProcessRow, env: Env, includeMovements = true): Promise<{ movements: Movement[]; municipalityCode: string; updatedAt: string | null; information: CaseInformation }> {
   if (!courtCatalog.some(c => c.id === process.tribunal) || !/^\d{20}$/.test(process.number)) throw new SourceError('Tribunal ou número não permitido na consulta DataJud.');
   const grades = process.instance === '1g' ? ['G1', 'JE'] : ['G2', 'TR'];
   const url = `https://api-publica.datajud.cnj.jus.br/api_publica_${process.tribunal}/_search`;
@@ -49,7 +50,7 @@ export async function queryDatajud(process: ProcessRow, env: Env): Promise<{ mov
   const recordIds = new Set<string>();
   let total = 0;
   for (let page = 0; page < 10; page++) {
-    const body = JSON.stringify({ size: 20, from: page * 20, track_total_hits: true, query: { bool: { filter: [{ match: { numeroProcesso: process.number } }, { bool: { should: grades.map(grau => ({ match: { grau } })), minimum_should_match: 1 } }] } }, _source: ['numeroProcesso','grau','movimentos','dataHoraUltimaAtualizacao','@timestamp','orgaoJulgador.codigoMunicipioIBGE'] });
+    const body = JSON.stringify({ size: 20, from: page * 20, track_total_hits: true, query: { bool: { filter: [{ match: { numeroProcesso: process.number } }, { bool: { should: grades.map(grau => ({ match: { grau } })), minimum_should_match: 1 } }] } }, _source: ['numeroProcesso','grau','dataHoraUltimaAtualizacao','@timestamp','orgaoJulgador','classe','assuntos','dataAjuizamento','sistema','formato',...(includeMovements ? ['movimentos'] : [])] });
     const request = () => fetch(url, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(45000), headers: { 'Content-Type': 'application/json', Authorization: `APIKey ${key}` }, body });
     let response: Response;
     try { response = await request(); }
@@ -71,7 +72,7 @@ export async function queryDatajud(process: ProcessRow, env: Env): Promise<{ mov
       if (typeof hit?._id !== 'string' || !hit._id || recordIds.has(hit._id)) throw new SourceError('O DataJud retornou uma página repetida ou sem identificadores válidos.');
       recordIds.add(hit._id);
       const record = hit?._source;
-      if (!record || record.numeroProcesso !== process.number || !grades.includes(record.grau) || !Array.isArray(record.movimentos)) throw new SourceError('O DataJud não retornou um histórico válido para este processo e instância.');
+      if (!record || record.numeroProcesso !== process.number || !grades.includes(record.grau) || includeMovements && !Array.isArray(record.movimentos)) throw new SourceError('O DataJud não retornou um histórico válido para este processo e instância.');
       records.push(record);
     }
     if (records.length > total) throw new SourceError('Contagem inconsistente na resposta DataJud.');
@@ -92,7 +93,7 @@ export async function queryDatajud(process: ProcessRow, env: Env): Promise<{ mov
     }
     const code = String(record.orgaoJulgador?.codigoMunicipioIBGE || '');
     if (!municipalityCode && /^\d{7}$/.test(code)) municipalityCode = code;
-    for (const movement of record.movimentos) {
+    for (const movement of includeMovements ? record.movimentos : []) {
       const code = String(movement?.codigo || '');
       if (!/^\d+$/.test(code)) throw new SourceError('Código de movimentação inválido no DataJud.');
       const occurred = date(movement.dataHora);
@@ -106,5 +107,14 @@ export async function queryDatajud(process: ProcessRow, env: Env): Promise<{ mov
       if (!seen.has(key)) { seen.add(key); movements.push({ key, date: occurred, description }); }
     }
   }
-  return { movements, municipalityCode, updatedAt };
+  const newest = records[0];
+  const information: CaseInformation = {
+    caseClass: namedCode(newest.classe),
+    subjects: Array.isArray(newest.assuntos) ? newest.assuntos.slice(0,100).map(namedCode).filter(Boolean) : [],
+    courtUnit: namedCode(newest.orgaoJulgador),
+    filedAt: filedDate(newest.dataAjuizamento),
+    system: infoText(newest.sistema?.nome),
+    format: infoText(newest.formato?.nome),
+  };
+  return { movements, municipalityCode, updatedAt, information };
 }

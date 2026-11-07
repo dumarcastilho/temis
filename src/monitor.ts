@@ -1,6 +1,7 @@
 import type { Env, ProcessRow } from './env';
 import { queryProcess } from './sources';
 import { SourceError } from './mni.js';
+import { storeCaseInformation } from './information';
 
 const hash = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))), b => b.toString(16).padStart(2, '0')).join('');
 
@@ -13,7 +14,7 @@ export async function checkProcess(env: Env, id: string, manual = false) {
   const interval = Math.max(15, Math.min(1440, Number(env.CHECK_INTERVAL_MINUTES) || 120)) * 60000;
   let stage = 'query_source';
   try {
-    const { movements, locality, source = 'direct', sourceUpdatedAt = null, fallbackReason = '' } = await queryProcess(row, env);
+    const { movements, locality, source = 'direct', sourceUpdatedAt = null, fallbackReason = '', information } = await queryProcess(row, env);
     const notify = !!row.initialized && row.last_source === source;
     // Resolve identities before making any writes: an invalid response never creates a partial baseline.
     stage = 'prepare_history';
@@ -47,6 +48,10 @@ export async function checkProcess(env: Env, id: string, manual = false) {
       for (const index of insertIndexes) added += results[index].meta.changes;
     }
     stage = 'complete_check';
+    if (information) {
+      try { await storeCaseInformation(env,id,source,information,sourceUpdatedAt,token); }
+      catch { console.error('process_information_failed',{tribunal:row.tribunal,provider:source}); }
+    }
     // Check the current stored value so a manual edit made while fetching is preserved.
     await env.DB.prepare(`UPDATE processes SET initialized=1,checked_at=?,last_error=NULL,next_check_at=?,lease_until=0,lease_token=NULL,locality=CASE WHEN trim(locality)='' AND ?<>'' THEN ? ELSE locality END,last_source=?,source_updated_at=?,fallback_reason=? WHERE id=? AND lease_token=?`)
       .bind(new Date().toISOString(), now + interval, locality, locality, source, sourceUpdatedAt, fallbackReason, id, token).run();

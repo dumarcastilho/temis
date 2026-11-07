@@ -1,9 +1,12 @@
 import { bindCnjMask } from './cnj-mask.js';
+import { courtProcessLink } from './court-link.js';
 import { processState, sortProcessList, processListText, formatLocality, processTrackingStatus, sortTrackingProcesses } from './process-list.js';
 const $ = selector => document.querySelector(selector);
 const state = { processes: [], visibleProcesses: [], session: null, selected: null, page: 0, notificationPage: 0, view: 'processes', processView: 'tracking' };
 try { if (localStorage.getItem('temis.processView') === 'simple') state.processView = 'simple'; } catch {}
 const format = n => n.replace(/^(\d{7})(\d{2})(\d{4})(\d)(\d{2})(\d{4})$/, '$1-$2.$3.$4.$5.$6');
+const sourceName = p => p.last_source === 'datajud' ? 'DataJud' : 'Tribunal';
+const sourceNote = p => p.last_source === 'datajud' ? `DataJud · atualização da base: ${p.source_updated_at ? date(p.source_updated_at) : 'não informada'}` : 'Consulta direta';
 const date = value => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date(value)) : 'Ainda não consultado';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 let toastTimer;
@@ -53,7 +56,7 @@ function render() {
   }
   $('#process-list').innerHTML = rows.map(p => {
     const [className, label] = status(p);
-    return `<tr><td><button class="process-title" data-detail="${p.id}">${esc(format(p.number))}${p.unread ? `<span class="new-badge">${p.unread} nova(s)</span>` : ''}</button><span class="process-label">${esc(p.label || 'Sem identificação')}</span></td><td><span class="court-tag">${esc(p.tribunal.toUpperCase())}</span><span class="timestamp">${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><span class="movement-summary">${esc(p.latest_movement || 'Aguardando primeira consulta')}</span><span class="timestamp">${p.latest_movement_at ? esc(date(p.latest_movement_at)) : '—'}</span></td><td><span class="status ${className}">${label}</span><span class="timestamp">${p.checked_at ? 'Verificado ' + esc(date(p.checked_at)) : 'Sem consulta confirmada'}</span></td><td><button class="row-arrow" data-detail="${p.id}" aria-label="Ver histórico de ${esc(format(p.number))}">›</button></td></tr>`;
+    return `<tr><td><button class="process-title" data-detail="${p.id}">${esc(format(p.number))}${p.unread ? `<span class="new-badge">${p.unread} nova(s)</span>` : ''}</button><span class="process-label">${esc(p.label || 'Sem identificação')}</span></td><td><span class="court-tag">${esc(p.tribunal.toUpperCase())}</span><span class="timestamp">${p.instance === '1g' ? '1º' : '2º'} grau</span></td><td><span class="movement-summary">${esc(p.latest_movement || 'Aguardando primeira consulta')}</span><span class="timestamp">${p.latest_movement_at ? esc(date(p.latest_movement_at)) : '—'}</span></td><td><span class="status ${className}">${label}</span><span class="timestamp">${p.checked_at ? 'Verificado ' + esc(date(p.checked_at)) : 'Sem consulta confirmada'}</span>${p.checked_at ? `<span class="timestamp">${esc(sourceNote(p))}</span>` : ''}</td><td><button class="row-arrow" data-detail="${p.id}" aria-label="Ver histórico de ${esc(format(p.number))}">›</button></td></tr>`;
   }).join('');
 }
 async function refresh() { state.processes = await api('/processes'); render(); if (state.view === 'courts') renderCourts(); }
@@ -76,49 +79,71 @@ function openForm(process) {
 }
 async function showDetail(id) {
   const p = state.processes.find(p => p.id === id); if (!p) return;
-  state.selected = id; state.page = 0;
+  state.selected = id; state.page = 0; $('#history-source').value = '';
   $('#detail-title').textContent = format(p.number);
-  $('#detail-meta').textContent = `${p.tribunal.toUpperCase()} · ${p.instance === '1g' ? '1º' : '2º'} grau · ${p.label || 'Sem identificação'} · Última consulta confirmada: ${date(p.checked_at)}`;
+  $('#detail-meta').textContent = `${p.tribunal.toUpperCase()} · ${p.instance === '1g' ? '1º' : '2º'} grau · ${p.label || 'Sem identificação'} · Última consulta confirmada: ${date(p.checked_at)}${p.checked_at ? ' · ' + sourceName(p) : ''}`;
   $('#detail-notes').textContent = p.notes;
   $('#detail-error').hidden = !(p.last_error || !configured(p));
   $('#detail-error').textContent = p.last_error || (!configured(p) ? 'A consulta direta deste tribunal/instância aguarda configuração e validação.' : '');
   $('#toggle-process').textContent = p.active ? 'Pausar' : 'Retomar';
   $('#check-process').disabled = !p.active || !configured(p);
-  $('#source-link').href = state.session.courts.find(c => c.id === p.tribunal).url;
+  const link = courtProcessLink(p, state.session.courts.find(c => c.id === p.tribunal));
+  $('#source-link').href = link.url;
+  $('#source-link-help').textContent = link.help;
+  $('#source-link-help').hidden = !link.help;
+  $('#source-info').hidden = p.last_source !== 'datajud';
+  $('#source-info').textContent = p.last_source === 'datajud' ? `Última consulta realizada pelo DataJud porque a consulta direta estava indisponível. Os dados podem ter atraso em relação ao tribunal. Atualização da base: ${p.source_updated_at ? date(p.source_updated_at) : 'não informada'}.` : '';
   $('#timeline').textContent = 'Carregando histórico…';
   if (!$('#detail-dialog').open) $('#detail-dialog').showModal();
   await loadMovements(false);
 }
 async function loadMovements(append) {
   const id = state.selected;
-  const result = await api(`/processes/${id}/movements?page=${state.page}`);
-  if (id !== state.selected) return;
+  const selectedSource = $('#history-source').value;
+  const result = await api(`/processes/${id}/movements?page=${state.page}&source=${encodeURIComponent(selectedSource)}`);
+  if (id !== state.selected || selectedSource !== $('#history-source').value) return;
   const html = result.items.map(m => `<li><time>${esc(date(m.occurred_at))} · Brasília</time><p>${esc(m.description)}</p></li>`).join('');
   if (append) $('#timeline').insertAdjacentHTML('beforeend', html); else $('#timeline').innerHTML = html || '<li><p>Ainda não há movimentações salvas. Consulte o tribunal para criar o histórico inicial.</p></li>';
   $('#more-movements').hidden = !result.hasMore;
 }
 async function loadNotifications(append) {
   const result = await api(`/notifications?page=${state.notificationPage}`);
-  const html = result.items.map(n => `<article class="notification-card ${n.is_read ? '' : 'unread'}"><h2><button class="process-title" data-detail="${n.process_id}">${esc(n.label || format(n.number))}</button></h2><small>${esc(n.tribunal.toUpperCase())} · Movimento de ${esc(date(n.occurred_at))}</small><p>${esc(n.description)}</p><small>Encontrado em ${esc(date(n.created_at))}</small><br>${n.is_read ? '<small>Lido</small>' : `<button class="button secondary" data-read="${n.id}">Marcar como lido</button>`}</article>`).join('');
+  const html = result.items.map(n => `<article class="notification-card ${n.is_read ? '' : 'unread'}"><h2><button class="process-title" data-detail="${n.process_id}">${esc(n.label || format(n.number))}</button></h2><small>${esc(n.tribunal.toUpperCase())} · Movimento de ${esc(date(n.occurred_at))} · ${n.source === 'datajud' ? 'DataJud' : 'Tribunal'}</small><p>${esc(n.description)}</p><small>Encontrado em ${esc(date(n.created_at))}</small><br>${n.is_read ? '<small>Lido</small>' : `<button class="button secondary" data-read="${n.id}">Marcar como lido</button>`}</article>`).join('');
   if (append) $('#notifications-list').insertAdjacentHTML('beforeend',html); else $('#notifications-list').innerHTML = html || '<div class="empty panel"><div class="empty-icon">↗</div><h3>Tudo em dia por aqui</h3><p>Os próximos movimentos encontrados aparecerão nesta central.</p></div>';
   $('#more-notifications').hidden = !result.hasMore;
+}
+function courtNote(court) {
+  const fallback = court.instances.some(i => i.datajudAvailable);
+  const direct = court.instances.some(i => i.directConfigured);
+  const note = court.id === 'tjgo' ? 'Conector público do Projudi para 1º grau. A comarca pode ser preenchida manualmente.'
+    : court.branch === 'labor' ? 'A consulta direta ao PJe pode exigir credenciamento pelo tribunal.'
+    : direct ? 'O acesso direto depende da disponibilidade e das permissões do tribunal.'
+    : 'A consulta direta depende de serviço compatível e acesso autorizado pelo tribunal.';
+  return note + (fallback ? ' Quando a consulta direta não estiver disponível, o DataJud será usado como alternativa pública.' : '');
 }
 function renderCourts() {
   const normalize = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const query = normalize($('#court-search').value.trim());
   const branch = $('#court-branch').value, availability = $('#court-availability').value;
-  const courts = state.session.courts.filter(c => (!query || normalize(`${c.id} ${c.name}`).includes(query)) && (!branch || c.branch === branch) && (!availability || !!c.instances.find(i => i.instance === '1g')?.configured === (availability === 'configured')));
+  const courts = state.session.courts.filter(c => (!query || normalize(`${c.id} ${c.name}`).includes(query)) && (!branch || c.branch === branch) && (!availability || !!c.instances.find(i => i.instance === '1g')?.directConfigured === (availability === 'configured')));
   $('#court-result-count').textContent = `${courts.length} de ${state.session.courts.length} tribunal(is)`;
   $('#courts-list').innerHTML = courts.map(c => `<article class="court-card"><h2>${esc(c.id.toUpperCase())} · ${esc(c.name)}</h2><p>${esc(c.system)} · ${esc({state:'Justiça Estadual',federal:'Justiça Federal',labor:'Justiça do Trabalho'}[c.branch] || 'Consulta direta')}</p>${c.instances.map(i => {
     const confirmed = state.processes.some(p => p.tribunal === c.id && p.instance === i.instance && p.initialized && p.checked_at && !p.last_error);
     const failed = state.processes.some(p => p.tribunal === c.id && p.instance === i.instance && p.last_error);
-    const label = !i.configured ? i.requiresCredentials ? 'Aguarda credenciamento' : 'Aguarda configuração' : failed ? 'Verificar acesso' : confirmed ? 'Consulta confirmada' : 'Aguardando primeira consulta';
+    const confirmedSource = state.processes.find(p => p.tribunal === c.id && p.instance === i.instance && p.initialized && p.checked_at && !p.last_error)?.last_source;
+    const label = failed ? 'Verificar consulta' : confirmed ? confirmedSource === 'datajud' ? 'Consulta via DataJud' : 'Consulta direta confirmada' : i.directConfigured ? i.datajudAvailable ? 'Direta + alternativa DataJud' : 'Aguardando primeira consulta' : i.datajudAvailable ? 'Disponível via DataJud' : i.requiresCredentials ? 'Aguarda credenciamento' : 'Aguarda configuração';
     return `<div class="instance-state"><span>${i.instance === '1g' ? '1º' : '2º'} grau</span><span class="status ${i.configured && confirmed && !failed ? 'ok' : 'error'}">${label}</span></div>`;
-  }).join('')}${c.id === 'tjrn' ? '<p>O acesso automático depende da confirmação do serviço MNI e das permissões fornecidas pelo tribunal.</p>' : c.id === 'tjba' ? '<p>O serviço oficial de 1º grau está configurado. A primeira consulta confirma se há acesso; o tribunal pode exigir credenciais ou liberação da conexão.</p>' : c.id === 'tjgo' ? '<p>Conector público do Projudi para 1º grau. A primeira consulta válida confirma a integração; a comarca pode ser preenchida manualmente.</p>' : c.branch === 'labor' ? '<p>O acesso automático pode exigir credenciamento pelo tribunal. O cadastro de um processo não confirma a liberação da consulta.</p>' : !c.instances.some(i => i.configured) ? '<p>Consulta automática pendente de serviço compatível e acesso autorizado pelo tribunal.</p>' : ''}<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Consulta oficial ↗</a></article>`).join('');
+  }).join('')}<p>${esc(courtNote(c))}</p><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Consulta oficial ↗</a></article>`).join('');
 }
 async function handleClick(event) {
   const button = event.target.closest('button'); if (!button) return;
   if (button.dataset.view) return setView(button.dataset.view);
+  if (button.id === 'copy-process-number') {
+    const p = state.processes.find(p => p.id === state.selected); if (!p) return;
+    try { await navigator.clipboard.writeText(format(p.number)); toast('Número do processo copiado.'); }
+    catch { $('#detail-title').focus(); const range = document.createRange(); range.selectNodeContents($('#detail-title')); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); toast('Número selecionado. Use a opção Copiar do navegador.'); }
+    return;
+  }
   if (button.dataset.processView) {
     state.processView = button.dataset.processView;
     try { localStorage.setItem('temis.processView', state.processView); } catch {}
@@ -149,6 +174,11 @@ async function handleClick(event) {
   }
 }
 document.addEventListener('click', event => { error(''); handleClick(event).catch(async e => { error(e.message); if ($('#detail-dialog').open) { $('#detail-error').textContent = e.message; $('#detail-error').hidden = false; } }); });
+$('#history-source').addEventListener('change', () => { state.page = 0; loadMovements(false).catch(e => error(e.message)); });
+$('#source-link').addEventListener('click', () => {
+  const p = state.processes.find(p => p.id === state.selected); if (!p) return;
+  navigator.clipboard?.writeText(format(p.number)).then(() => toast('Número do processo copiado.')).catch(() => {});
+});
 for (const selector of ['#search','#court-filter','#status-filter']) $(selector).addEventListener('input', render);
 for (const selector of ['#court-search','#court-branch','#court-availability']) $(selector).addEventListener('input', renderCourts);
 $('#process-form').addEventListener('submit', async event => {

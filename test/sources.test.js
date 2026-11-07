@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const result = await build({ entryPoints: ['src/sources.ts'], bundle: true, write: false, format: 'esm', platform: 'node', target: 'node24' });
-const { queryTjmt, queryTjmtProcess, queryTjgoProcess, querySource, queryProcess } = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
+const { queryTjmt, queryTjmtProcess, queryTjgoProcess, querySource: originalQuerySource, queryDirectProcess: queryProcess } = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
+const querySource = (process, env) => originalQuerySource(process, { ...env, DATAJUD_ENABLED: 'false' });
 const number = '99999990020998119999';
 
 test('TJGO uses the official Projudi service, encodes access identifiers and does not invent a municipality from the court unit', async () => {

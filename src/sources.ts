@@ -2,9 +2,11 @@ import type { Env, ProcessRow } from './env';
 import { connectors, courts, validateEndpoint } from './courts';
 import { envelope, parseMniProcess, soapXml, SourceError } from './mni.js';
 import { parseGoProcess, parseGoMovements } from './projudi.js';
+import { boundedResponse } from './source-http';
+import { queryDatajud, datajudEnabled } from './datajud';
 
 export interface Movement { key: string; date: string; description: string }
-export interface ProcessResult { movements: Movement[]; locality: string }
+export interface ProcessResult { movements: Movement[]; locality: string; source?: 'direct' | 'datajud'; sourceUpdatedAt?: string | null; fallbackReason?: string }
 const TJMT = 'https://hellsgate.tjmt.jus.br/consultaprocessual/ProcessosJudiciais';
 const municipalityCache = new Map<string, { name: string; expires: number }>();
 const cleanLocality = (value: unknown): string => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) : '';
@@ -26,30 +28,6 @@ async function municipalityName(code: string): Promise<string> {
   } catch { return ''; } // A missing municipality name must not invalidate a successful court consultation.
 }
 
-async function boundedResponse(response: Response): Promise<string> {
-  if (response.status >= 300 && response.status < 400) throw new SourceError('O tribunal redirecionou a consulta. O histórico não foi alterado; verifique a disponibilidade do serviço.');
-  if (response.status === 401 || response.status === 403) throw new SourceError(`O tribunal recusou o acesso ao serviço (HTTP ${response.status}). Confirme as permissões, as credenciais quando exigidas e eventuais exigências de liberação de acesso com o tribunal.`);
-  if (!response.ok) throw new SourceError(`Tribunal indisponível (HTTP ${response.status}).`);
-  const reader = response.body?.getReader();
-  if (!reader) throw new SourceError('Tribunal retornou resposta vazia.');
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > 8_000_000) { await reader.cancel(); throw new SourceError('Resposta do tribunal excede o limite de consulta.'); }
-    chunks.push(value);
-  }
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { joined.set(chunk, offset); offset += chunk.length; }
-  const declaration = new TextDecoder().decode(joined.subarray(0, 200));
-  const charset = response.headers.get('content-type')?.match(/charset\s*=\s*["']?([\w-]+)/i)?.[1]
-    || declaration.match(/^\s*<\?xml[^>]*encoding\s*=\s*["']([\w-]+)["']/i)?.[1] || 'utf-8';
-  if (!/^(?:utf-8|utf8|iso-8859-1|windows-1252)$/i.test(charset)) throw new SourceError('Codificação de texto do tribunal não suportada.');
-  return new TextDecoder(charset).decode(joined);
-}
 
 async function getJson(url: string): Promise<any> {
   const response = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(20000) });
@@ -78,7 +56,8 @@ export async function queryTjmtProcess(number: string, instance: string): Promis
     if (!/^\d+$/.test(code) || seen.has(code)) continue;
     seen.add(code);
     const detail = await getJson(`${TJMT}/${number}/${code}`);
-    if (detail.numeroUnico !== number || detail.segredo || !Array.isArray(detail.eventos)) throw new SourceError('TJMT não retornou histórico público válido.');
+    if (detail.segredo) throw new SourceError('TJMT informou que o processo não permite consulta pública.', false);
+    if (detail.numeroUnico !== number || !Array.isArray(detail.eventos)) throw new SourceError('TJMT não retornou histórico público válido.');
     const name = cleanLocality(detail.jurisdicao?.nome) || cleanLocality(detail.localidade?.descricao) || cleanLocality(record.jurisdicao?.nome);
     if (name) localities.push({ name, archived: !!(detail.arquivado ?? record.arquivado), latest: detail.eventos.reduce((latest: number, e: any) => Math.max(latest, Date.parse(e?.data) || 0), 0) });
     for (const event of detail.eventos) {
@@ -113,7 +92,7 @@ export async function queryTjgoProcess(number: string): Promise<ProcessResult> {
   return { movements, locality: '' };
 }
 
-export async function queryProcess(process: ProcessRow, env: Env): Promise<ProcessResult> {
+export async function queryDirectProcess(process: ProcessRow, env: Env): Promise<ProcessResult> {
   if (process.tribunal === 'tjmt') return queryTjmtProcess(process.number, process.instance);
   const connector = connectors(env)[`${process.tribunal}:${process.instance}`];
   if (process.tribunal === 'tjgo' && process.instance === '1g' && !connector) return queryTjgoProcess(process.number);
@@ -129,6 +108,16 @@ export async function queryProcess(process: ProcessRow, env: Env): Promise<Proce
   const result = parseMniProcess(xml, process.number, courts.find(c => c.id === process.tribunal)?.offset || '-03:00');
   const locality = !process.locality?.trim() && result.municipalityCode ? await municipalityName(result.municipalityCode) : '';
   return { movements: result.movements, locality };
+}
+
+export async function queryProcess(process: ProcessRow, env: Env): Promise<ProcessResult> {
+  try { return { ...await queryDirectProcess(process, env), source: 'direct', sourceUpdatedAt: null, fallbackReason: '' }; }
+  catch (error) {
+    if (!datajudEnabled(env) || error instanceof SourceError && !error.allowFallback) throw error;
+    const result = await queryDatajud(process, env);
+    const locality = !process.locality?.trim() && result.municipalityCode ? await municipalityName(result.municipalityCode) : '';
+    return { movements: result.movements, locality, source: 'datajud', sourceUpdatedAt: result.updatedAt, fallbackReason: error instanceof SourceError ? error.message.slice(0, 800) : 'Consulta direta indisponível.' };
+  }
 }
 
 export async function querySource(process: ProcessRow, env: Env): Promise<Movement[]> {

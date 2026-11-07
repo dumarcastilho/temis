@@ -1,6 +1,9 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import tpu from './tpu-movements.json' with { type: 'json' };
 
-export class SourceError extends Error {}
+export class SourceError extends Error {
+  constructor(message, allowFallback = true) { super(message); this.allowFallback = allowFallback; }
+}
 
 // CXF can return a SOAP envelope as the root MIME part even when no documents were requested.
 export function soapXml(body, contentType = '') {
@@ -75,6 +78,7 @@ export function parseMniProcess(xml, number, offset = '-03:00') {
   if (!result || !['true', '1'].includes(String(result.sucesso))) throw new SourceError('Consulta não autorizada ou processo não localizado pelo tribunal.');
   const process = result.processo;
   if (!process || String(process.dadosBasicos?.['@_numero']).replace(/\D/g, '') !== number) throw new SourceError('O tribunal não retornou o processo solicitado.');
+  if (Number(process.dadosBasicos?.['@_nivelSigilo'] || 0) > 0) throw new SourceError('O tribunal informou que o processo não permite consulta pública.', false);
   const rawCode = String(process.dadosBasicos?.orgaoJulgador?.['@_codigoMunicipioIBGE'] || '');
   const municipalityCode = /^\d{7}$/.test(rawCode) ? rawCode : '';
   const stateCode = municipalityCode.slice(0, 2);
@@ -90,9 +94,13 @@ export function parseMniProcess(xml, number, offset = '-03:00') {
     const local = m.movimentoLocal;
     const code = national?.['@_codigoNacional'] || local?.['@_codigoMovimento'] || '';
     const complements = list(m.complemento).map(c => typeof c === 'string' ? c : c['#text'] || c['@_descricao'] || '').filter(Boolean);
-    const description = [local?.['@_descricao'] || national?.['@_descricao'] || m['@_descricao'] || (code ? `Movimento ${code}` : ''), ...complements].filter(Boolean).join(' · ');
+    const provided = local?.['@_descricao'] || national?.['@_descricao'] || m['@_descricao'];
+    const legacyDescription = [provided || (code ? `Movimento ${code}` : ''), ...complements].filter(Boolean).join(' · ');
+    // Resolve national codes only: local tribunal codes can have different meanings.
+    const description = [provided || (national && tpu.movements[code]) || (code ? `Movimento ${code}` : ''), ...complements].filter(Boolean).join(' · ');
     if (!description) throw new SourceError('Movimentação sem descrição ou código.');
-    return { key: JSON.stringify([m['@_identificadorMovimento'] || '', date, code, description]), date: new Date(date).toISOString(), description: description.slice(0, 4000) };
+    // Preserve the previous identity so label enrichment does not create duplicate alerts.
+    return { key: JSON.stringify([m['@_identificadorMovimento'] || '', date, code, legacyDescription]), date: new Date(date).toISOString(), description: description.slice(0, 4000) };
   });
   return { movements, municipalityCode };
 }

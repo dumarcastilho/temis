@@ -28,8 +28,20 @@ test('empty successful history is valid; failure and wrong process are not',()=>
 });
 test('national code fallback and movement secrecy',()=> {
   const movement='<movimento dataHora="20990101120000"><movimentoNacional codigoNacional="51"/></movimento>';
-  assert.equal(parseMni(xml(movement),number)[0].description,'Movimento 51');
+  assert.equal(parseMni(xml(movement),number)[0].description,'Conclusão');
   assert.deepEqual(parseMni(xml(movement.replace('dataHora=','nivelSigilo="1" dataHora=')),number),[]);
+});
+test('official TPU names replace numeric placeholders without changing legacy movement identities or local court codes',()=> {
+  for (const [code,label] of [['92','Publicação'],['85','Petição'],['60','Expedição de documento'],['12164','Outras Decisões']]) {
+    const value = `<movimento dataHora="20990101120000" identificadorMovimento="synthetic"><movimentoNacional codigoNacional="${code}"/><complemento>Detalhe sintético</complemento></movimento>`;
+    const m=parseMni(xml(value),number)[0];
+    assert.equal(m.description,label+' · Detalhe sintético');
+    assert.equal(m.key,JSON.stringify(['synthetic','2099-01-01T12:00:00-03:00',code,`Movimento ${code} · Detalhe sintético`]));
+    const local=parseMni(xml(value.replace('movimentoNacional','movimentoLocal').replace('codigoNacional','codigoMovimento')),number)[0];
+    assert.equal(local.description,`Movimento ${code} · Detalhe sintético`);
+    const supplied=parseMni(xml(value.replace(`codigoNacional="${code}"`,`codigoNacional="${code}" descricao="Descrição fornecida pelo tribunal"`)),number)[0];
+    assert.equal(supplied.description,'Descrição fornecida pelo tribunal · Detalhe sintético');
+  }
 });
 test('envelope escapes credentials and requests header without document contents',()=> {
   const body=envelope(number,{username:'u<&',password:'p"<'});

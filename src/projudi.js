@@ -22,6 +22,7 @@ export function parseGoProcess(xml, number) {
   if (matches.length !== 1 || records.length !== 1) throw new SourceError('O Projudi não retornou um processo único correspondente ao número solicitado.');
   const p = matches[0];
   const secrecy = text(p.outrasInformacoes?.segredoJustica).toLocaleLowerCase('pt-BR');
+  if (['true','1','sim','s'].includes(secrecy)) throw new SourceError('O Projudi informou que o processo não permite consulta pública.', false);
   if (!['false', '0', 'não', 'nao', 'n'].includes(secrecy)) throw new SourceError('O Projudi não confirmou que o processo permite consulta pública.');
   const id = text(p.idProcesso), hash = text(p.hashProcesso);
   if (!/^\d{1,30}$/.test(id) || !hash || hash.length > 256 || /[\u0000-\u001f\u007f]/.test(hash)) throw new SourceError('Identificadores inválidos na consulta Projudi.');

@@ -21,9 +21,11 @@ Acompanhamento privado de processos judiciais em Cloudflare Workers, com banco C
 
 ## Fontes e cobertura
 
-O Temis **não utiliza DataJud**. A consulta precisa estar disponível diretamente no tribunal.
+O Temis prioriza a consulta direta ao tribunal. Quando ela falha ou não existe conector direto, usa a [API Pública do DataJud/CNJ](https://datajud-wiki.cnj.jus.br/api-publica/) como alternativa para processos públicos. A carteira mostra a fonte efetiva e a atualização informada pela base; a consulta direta é tentada novamente nas próximas verificações.
 
-O cadastro aceita os 57 tribunais da Justiça Estadual (incluindo TJDFT), Federal e do Trabalho, com prioridade para o 1º grau. **Presença no catálogo não significa integração automática concluída.** Sem um serviço compatível e acesso autorizado, o processo pode ser cadastrado e organizado, mas permanece com integração pendente. Justiça Eleitoral, Militar e tribunais superiores não fazem parte desse catálogo.
+O DataJud depende das remessas dos tribunais e pode estar defasado. Não é uma consulta em tempo real ao PJe, não oferece documentos nem dados de processos sigilosos e não garante que um processo recente já esteja disponível. Um resultado ausente, parcial ou inválido não cria um histórico vazio nem apaga o histórico anterior.
+
+O cadastro aceita os 57 tribunais da Justiça Estadual (incluindo TJDFT), Federal e do Trabalho, com prioridade para o 1º grau. **Presença no catálogo não significa integração automática concluída.** O DataJud pode atender os tribunais sem serviço direto acessível; disponibilidade de cada processo, instância e atualização precisa ser confirmada na consulta. Sem resposta válida em qualquer fonte, o processo fica com indicação de erro. Justiça Eleitoral, Militar e tribunais superiores não fazem parte desse catálogo.
 
 A identificação por TRF representa a região da Justiça Federal de origem. Os serviços de 1º grau podem ser separados por seção judiciária; não se deve usar um endpoint de 2º grau para todos os processos federais.
 
@@ -33,14 +35,32 @@ A identificação por TRF representa a região da Justiça Federal de origem. Os
 | TJPE | [MNI oficial](https://portal.tjpe.jus.br/web/transparencia/tic/dados-abertos) | 1º grau com conector público embutido, incluindo respostas SOAP multipart/MTOM. 2º grau exige configurar e validar o endpoint e o acesso. |
 | TJBA | [MNI oficial](https://www.tjba.jus.br/portal/web-service/) | Endpoint oficial de 1º grau embutido. O acesso e a resposta de um processo real ainda precisam ser validados; pode exigir credenciais ou liberação pelo tribunal. 2º grau permanece pendente. |
 | TJRN | PJe | Cadastro disponível; integração direta ainda depende de endpoint/acesso e validação. |
-| TJGO | [Serviços públicos do Projudi](https://transparencia.tjgo.jus.br/ti-comunicacoes/acesso-automatizado) | Conector de 1º grau implementado conforme o contrato XML oficial; validação com processo real pendente. 2º grau permanece pendente. |
+| TJGO | [Serviços públicos do Projudi](https://transparencia.tjgo.jus.br/ti-comunicacoes/acesso-automatizado) | Conector público de 1º grau embutido, conforme o contrato XML oficial. 2º grau depende de serviço compatível; DataJud disponível como alternativa. |
 | TJPI, TJES, TJAM (SAJ) | Contratos oficiais: [TJPI](https://pje.tjpi.jus.br/1g/intercomunicacao?wsdl), [TJES](https://pje.tjes.jus.br/pje/intercomunicacao?wsdl), [TJAM](https://www.tjam.jus.br/index.php/dados-abertos) | Perfis MNI de 1º grau embutidos, desativados até configuração explícita de acesso. Sem consulta real validada; não cobrem automaticamente outros sistemas do mesmo tribunal. |
 | TRF1, TRT6, TRT15 | [TRF1](https://www.trf1.jus.br/trf1/conteudo/NUGTI/MNI_Orienta%C3%A7%C3%B5es.pdf), [TRT6](https://www.trt6.jus.br/portal/transparencia/dados-abertos), [TRT15](https://trt15.jus.br/transparencia/dados-abertos) | Perfis MNI de 1º grau embutidos, desativados até configuração explícita. Exigem validar as permissões e o contrato com credenciais autorizadas; TRT6 e TRT15 informam exigência de credenciamento ou convênio. |
-| Demais TJs, TRFs e TRTs | Portal oficial de cada tribunal na tela **Tribunais e integrações** | Cadastro e configuração MNI 2.2.2 disponíveis. Endpoint, acesso e compatibilidade precisam ser confirmados; sistemas ou versões diferentes podem exigir adaptadores ainda não implementados. |
+| Demais TJs, TRFs e TRTs | Portal oficial de cada tribunal na tela **Tribunais e integrações** | Cadastro e configuração MNI 2.2.2 disponíveis. DataJud como alternativa pública. A consulta direta exige confirmar endpoint, acesso e compatibilidade; sistemas ou versões diferentes podem exigir adaptadores ainda não implementados. |
 
-A tela **Tribunais** distingue configuração ou credenciamento pendente, primeira consulta pendente, consulta confirmada e falha de acesso. A confirmação depende de um processo com histórico consultado com sucesso e sem erro registrado na carteira. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML simples ou envelope XML em multipart/related (MTOM), movimentos nacionais/locais e credenciais opcionais no envelope. Anexos MIME são ignorados e partes incompletas ou não reconhecidas são rejeitadas; adaptações de contrato podem ser necessárias em cada instalação.
+A tela **Tribunais** distingue consulta direta, alternativa DataJud, primeira consulta pendente e falha de consulta. A configuração direta e seu eventual credenciamento são independentes da alternativa DataJud. A confirmação depende de um processo com histórico consultado com sucesso e sem erro registrado na carteira. Configurar um endpoint não comprova disponibilidade nem autorização. O cliente MNI suporta SOAP 1.1 no modelo 2.2.2, com resposta XML simples ou envelope XML em multipart/related (MTOM), movimentos nacionais/locais e credenciais opcionais no envelope. Anexos MIME são ignorados e partes incompletas ou não reconhecidas são rejeitadas; adaptações de contrato podem ser necessárias em cada instalação.
 
-O número CNJ identifica o tribunal, mas não necessariamente a instância atual. Cadastre 1º e 2º graus separadamente quando necessário. O produto atualmente trabalha com processos e movimentações públicos. Não baixa documentos, não abre intimações e não contorna CAPTCHA, MFA ou restrições do tribunal. Regras de acesso por IP fixo ou certificado cliente exigem infraestrutura e implementação adicional.
+O número CNJ identifica o tribunal, mas não necessariamente a instância atual. Cadastre 1º e 2º graus separadamente quando necessário. O produto trabalha com processos e movimentações públicos. Não baixa documentos, não abre intimações e não contorna CAPTCHA, MFA ou restrições do tribunal. Regras de acesso por IP fixo ou certificado cliente exigem infraestrutura e implementação adicional.
+
+## Nomes das movimentações e links oficiais
+
+Quando o MNI retorna um código nacional sem descrição, o Temis resolve o nome pela tabela oficial TPU/CNJ incluída na aplicação. Descrições fornecidas pelo tribunal e complementos são preservados; códigos locais não são confundidos com códigos nacionais. A próxima consulta atualiza os nomes já salvos sem recriar os movimentos ou seus avisos.
+
+A tabela é obtida do [serviço público TPU/CNJ](https://gateway.cloud.pje.jus.br/tpu/api/v1/publico/download/movimentos). Para atualizá-la, execute `node scripts/update-tpu.mjs` e revise a alteração em `src/tpu-movements.json`. Ela contém somente códigos e nomes públicos da taxonomia, sem dados de processos.
+
+**Abrir tribunal** abre outra aba. O TJMT aceita o número no link de consulta. Páginas públicas PJe e Projudi recebem o número na URL de pesquisa quando esse formato é conhecido; isso não substitui CAPTCHA, identificadores assinados ou pesquisa exigida pelo portal. Portais como o TJPE podem exigir um identificador específico e CAPTCHA para abrir o detalhe; passar apenas o número não garante a abertura automática. O número é copiado ao abrir, se o navegador permitir; o botão **Copiar número** oferece uma alternativa.
+
+## Alternativa DataJud
+
+O recurso é habilitado por padrão para os 57 tribunais do catálogo. A chave pública de autenticação é obtida da [documentação oficial do CNJ](https://datajud-wiki.cnj.jus.br/api-publica/acesso/) e mantida temporariamente em memória no Worker; não é enviada ao navegador, registrada em logs ou versionada. Se a página não estiver acessível ou o CNJ mudar seu formato, configure `DATAJUD_API_KEY` como segredo do Worker com a chave pública vigente. A configuração explícita tem prioridade. `DATAJUD_ENABLED=false` desativa a alternativa e mantém somente a consulta direta.
+
+A busca restringe tribunal, número CNJ e grau. Para o 1º grau aceita `G1` e `JE`; para o 2º grau, `G2` e `TR`. Respostas com erro, páginas repetidas, pesquisa incompleta ou datas inválidas são rejeitadas. O nome da movimentação vem do DataJud, com TPU como alternativa quando omitido.
+
+A primeira consulta e a primeira consulta após uma troca de fonte criam uma referência inicial, sem alertar sobre movimentos antigos. Só movimentos novos encontrados nas verificações seguintes da mesma fonte geram avisos. Históricos anteriores e leituras dos avisos são preservados; use **Histórico exibido** no detalhe para alternar entre consulta direta e DataJud. A API de movimentos aceita `source=direct` ou `source=datajud`; sem esse parâmetro mostra a fonte da última consulta.
+
+A atualização depende da resposta do CNJ e pode levar dezenas de segundos. A chave pública não substitui as credenciais ou autorizações MNI da consulta direta. A migração `0003_history_sources.sql` mantém os movimentos existentes como consulta direta e separa as fontes. A implantação com `deploy:ci` aplica as migrações antes de publicar o Worker.
 
 ## Requisitos
 
@@ -63,7 +83,7 @@ pnpm dev --var LOCAL_DEV:true
 
 Abra `http://localhost:8787`. O acesso de desenvolvimento só funciona em loopback (`localhost`, `127.0.0.1`, `::1`) e representa `developer@example.invalid`. Não defina `LOCAL_DEV` no ambiente remoto. Sem esse parâmetro, a aplicação exige Cloudflare Access também localmente.
 
-O estado local fica em `.wrangler/`, fora do versionamento. Sem conectores adicionais configurados, cadastros dos demais tribunais ficam como integração pendente. TJMT, TJPE de 1º grau, TJBA de 1º grau e Projudi/TJGO de 1º grau possuem endereços embutidos; isso não garante autorização ou disponibilidade do serviço.
+O estado local fica em `.wrangler/`, fora do versionamento. Sem conectores diretos adicionais, os demais tribunais usam a alternativa DataJud por padrão. TJMT, TJPE de 1º grau, TJBA de 1º grau e Projudi/TJGO de 1º grau possuem endereços embutidos; isso não garante autorização ou disponibilidade do serviço.
 
 ```sh
 pnpm test
@@ -135,7 +155,7 @@ Todos os usuários liberados compartilham a mesma carteira e podem editar ou exc
 
 A prioridade de integração é o 1º grau. As chaves de configuração aceitam os identificadores do catálogo seguidos de `:1g` (por exemplo, `tjsp:1g`, `trf3:1g` e `trt24:1g`). Isso habilita o cliente SOAP 1.1 / MNI 2.2.2 para o endereço informado, não cria compatibilidade com APIs SAJ/Projudi próprias, eproc ou MNI 3.0. Serviços que exigem certificado cliente ou IP fixo precisam de infraestrutura e adaptação adicionais.
 
-Há perfis de endpoint embutidos para `tjpi:1g`, `tjes:1g`, `tjam:1g`, `trf1:1g`, `trt6:1g` e `trt15:1g`. Eles só são ativados se a respectiva chave estiver presente em `COURT_CONNECTORS`; o serviço não é consultado anonimamente por padrão. Exemplo de configuração de um perfil, com credenciais fictícias:
+Há perfis de endpoint embutidos para `tjpi:1g`, `tjes:1g`, `tjam:1g`, `trf1:1g`, `trt6:1g` e `trt15:1g`. Eles só são ativados se a respectiva chave estiver presente em `COURT_CONNECTORS`; o MNI desses perfis não é consultado anonimamente por padrão. Sem configuração direta, a alternativa DataJud continua disponível. Exemplo de configuração de um perfil, com credenciais fictícias:
 
 ```json
 {
@@ -148,7 +168,7 @@ Há perfis de endpoint embutidos para `tjpi:1g`, `tjes:1g`, `tjam:1g`, `trf1:1g`
 
 Para outros tribunais, informe também `endpoint`. Use apenas acesso concedido pelo tribunal. Um contrato WSDL acessível não comprova permissão para consultar processos.
 
-O TJRN permanece pendente até que o tribunal confirme um endpoint MNI acessível e as condições de acesso; uma URL de consulta pública no navegador não substitui esse serviço. Configure `tjrn:1g` apenas com o endereço autorizado fornecido pelo tribunal. Não use URLs antigas ou de outro segmento da Justiça.
+A consulta direta do TJRN permanece pendente até que o tribunal confirme um endpoint MNI acessível e as condições de acesso; uma URL de consulta pública no navegador não substitui esse serviço. Configure `tjrn:1g` apenas com o endereço autorizado fornecido pelo tribunal. Não use URLs antigas ou de outro segmento da Justiça.
 
 O conector Projudi/TJGO consulta as operações públicas 74 (dados) e 75 (movimentações), verifica a correspondência do número e a indicação de consulta pública e preserva os acentos de respostas ISO-8859-1. Respostas ambíguas, sigilosas, incompletas ou com paginação ainda não reconhecida geram erro e não confirmam um histórico parcial. A serventia não é usada como nome da comarca. A primeira validação com processo real continua necessária para confirmar variações do contrato e da paginação.
 

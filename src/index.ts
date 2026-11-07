@@ -2,6 +2,7 @@
 import type { Env, ProcessRow } from './env';
 import { authenticate } from './auth';
 import { courts, connectors, hasPublicConnector, hasConnectorProfile } from './courts';
+import { datajudEnabled } from './datajud';
 import { normalizeNumber, tribunalFor } from './cnj.js';
 import { checkProcess, monitor } from './monitor';
 
@@ -36,10 +37,14 @@ async function api(request: Request, env: Env, email: string) {
   const path = url.pathname;
   if (request.method === 'GET' && path === '/api/session') {
     const configured = connectors(env);
-    return json({ email, courts: courts.map(c => ({ ...c, instances: ['1g', '2g'].map(instance => ({ instance, requiresCredentials: hasConnectorProfile(c.id, instance), configured: hasPublicConnector(c.id, instance) || !!configured[`${c.id}:${instance}`] })) })) });
+    return json({ email, courts: courts.map(c => ({ ...c, instances: ['1g', '2g'].map(instance => {
+      const directConfigured = hasPublicConnector(c.id, instance) || !!configured[`${c.id}:${instance}`];
+      const datajudAvailable = datajudEnabled(env);
+      return { instance, requiresCredentials: hasConnectorProfile(c.id, instance), directConfigured, datajudAvailable, configured: directConfigured || datajudAvailable };
+    }) })) });
   }
   if (request.method === 'GET' && path === '/api/processes') {
-    const rows = await env.DB.prepare(`SELECT p.*, (SELECT description FROM movements WHERE process_id=p.id ORDER BY occurred_at DESC LIMIT 1) latest_movement, (SELECT occurred_at FROM movements WHERE process_id=p.id ORDER BY occurred_at DESC LIMIT 1) latest_movement_at, (SELECT count(*) FROM notifications n WHERE n.process_id=p.id AND NOT EXISTS(SELECT 1 FROM notification_reads r WHERE r.notification_id=n.id AND r.user_email=?)) unread FROM processes p ORDER BY p.created_at DESC`).bind(email).all();
+    const rows = await env.DB.prepare(`SELECT p.*, (SELECT description FROM movements WHERE process_id=p.id AND source=p.last_source ORDER BY occurred_at DESC LIMIT 1) latest_movement, (SELECT occurred_at FROM movements WHERE process_id=p.id AND source=p.last_source ORDER BY occurred_at DESC LIMIT 1) latest_movement_at, (SELECT count(*) FROM notifications n WHERE n.process_id=p.id AND NOT EXISTS(SELECT 1 FROM notification_reads r WHERE r.notification_id=n.id AND r.user_email=?)) unread FROM processes p ORDER BY p.created_at DESC`).bind(email).all();
     return json(rows.results.map(({ lease_token, lease_until, created_by, ...p }) => p));
   }
   if (request.method === 'POST' && path === '/api/processes') {
@@ -64,8 +69,10 @@ async function api(request: Request, env: Env, email: string) {
     if (!process) return fail('Processo não encontrado.', 404);
     if (request.method === 'GET' && action === 'movements') {
       const page = Math.max(0, Math.min(10000, Number(url.searchParams.get('page')) || 0));
-      const results = await env.DB.prepare('SELECT id,occurred_at,description,detected_at FROM movements WHERE process_id=? ORDER BY occurred_at DESC,id LIMIT 101 OFFSET ?').bind(id, Math.floor(page) * 100).all();
-      return json({ items: results.results.slice(0,100), hasMore: results.results.length > 100 });
+      const source = url.searchParams.get('source') || process.last_source;
+      if (!['direct','datajud'].includes(source)) return fail('Fonte de histórico inválida.');
+      const results = await env.DB.prepare('SELECT id,occurred_at,description,detected_at,source FROM movements WHERE process_id=? AND source=? ORDER BY occurred_at DESC,id LIMIT 101 OFFSET ?').bind(id, source, Math.floor(page) * 100).all();
+      return json({ items: results.results.slice(0,100), hasMore: results.results.length > 100, source });
     }
     if (request.method === 'POST' && action === 'check') {
       if (!process.active) return fail('Retome o acompanhamento antes de consultar.');
@@ -88,7 +95,7 @@ async function api(request: Request, env: Env, email: string) {
   }
   if (request.method === 'GET' && path === '/api/notifications') {
     const page = Math.max(0, Math.min(10000, Math.floor(Number(url.searchParams.get('page')) || 0)));
-    const rows = await env.DB.prepare(`SELECT n.id,n.process_id,n.created_at,p.number,p.label,p.tribunal,m.description,m.occurred_at,CASE WHEN r.notification_id IS NULL THEN 0 ELSE 1 END AS is_read FROM notifications n JOIN processes p ON p.id=n.process_id JOIN movements m ON m.id=n.movement_id LEFT JOIN notification_reads r ON r.notification_id=n.id AND r.user_email=? ORDER BY n.created_at DESC,n.id LIMIT 101 OFFSET ?`).bind(email, page * 100).all();
+    const rows = await env.DB.prepare(`SELECT n.id,n.process_id,n.created_at,p.number,p.label,p.tribunal,m.description,m.occurred_at,m.source,CASE WHEN r.notification_id IS NULL THEN 0 ELSE 1 END AS is_read FROM notifications n JOIN processes p ON p.id=n.process_id JOIN movements m ON m.id=n.movement_id LEFT JOIN notification_reads r ON r.notification_id=n.id AND r.user_email=? ORDER BY n.created_at DESC,n.id LIMIT 101 OFFSET ?`).bind(email, page * 100).all();
     return json({ items: rows.results.slice(0,100), hasMore: rows.results.length > 100 });
   }
   const read = path.match(/^\/api\/notifications\/([a-f0-9-]{36})\/read$/);

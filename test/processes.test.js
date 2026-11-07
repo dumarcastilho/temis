@@ -29,7 +29,7 @@ test('court availability enables new first-instance connectors without enabling 
   assert.equal(courts.filter(c => c.branch === 'state').length, 27);
   assert.equal(courts.filter(c => c.branch === 'federal').length, 6);
   assert.equal(courts.filter(c => c.branch === 'labor').length, 24);
-  const configured = (court, instance) => courts.find(c => c.id === court).instances.find(i => i.instance === instance).configured;
+  const configured = (court, instance) => courts.find(c => c.id === court).instances.find(i => i.instance === instance).directConfigured;
   for (const court of ['tjgo', 'tjba', 'tjpe']) {
     assert.equal(configured(court, '1g'), true);
     assert.equal(configured(court, '2g'), false);
@@ -63,14 +63,34 @@ test('all national catalog courts accept valid synthetic CNJ registration while 
 });
 
 test('session indicates configured regional connectors without returning service credentials or endpoints', async () => {
-  const env = { LOCAL_DEV:'true', COURT_CONNECTORS:JSON.stringify({'trt6:1g':{username:'synthetic-user',password:'synthetic-secret'}}) };
+  const env = { LOCAL_DEV:'true', DATAJUD_API_KEY:'syntheticPublicKeyBase64==', COURT_CONNECTORS:JSON.stringify({'trt6:1g':{username:'synthetic-user',password:'synthetic-secret'}}) };
   const response = await request(env, '/api/session');
   const result = await response.json();
   assert.equal(result.courts.find(c=>c.id==='trt6').instances[0].configured, true);
-  assert.equal(result.courts.find(c=>c.id==='trt15').instances[0].configured, false);
+  assert.equal(result.courts.find(c=>c.id==='trt15').instances[0].directConfigured, false);
+  assert.equal(result.courts.find(c=>c.id==='trt15').instances[0].datajudAvailable, true);
   assert.ok(!JSON.stringify(result).includes('synthetic-user'));
   assert.ok(!JSON.stringify(result).includes('synthetic-secret'));
+  assert.ok(!JSON.stringify(result).includes(env.DATAJUD_API_KEY));
   assert.ok(!JSON.stringify(result).includes('mni222/intercomunicacao'));
+});
+
+test('source migration preserves old history and the API shows the active source while allowing access to archived source histories',async()=>{
+ const db=new DatabaseSync(':memory:');
+ try{
+  for(const migration of migrations)db.exec(migration);
+  const env={DB:binding(db),LOCAL_DEV:'true'};
+  const created=await request(env,'/api/processes','POST',{number:'99999992420998099999'});const {id}=await created.json();
+  db.prepare('INSERT INTO movements(id,process_id,source_id,occurred_at,description,source) VALUES (?,?,?,?,?,?)').run('old-direct',id,'old-direct','2099-01-03T12:00:00Z','Direto sintético','direct');
+  db.prepare('INSERT INTO movements(id,process_id,source_id,occurred_at,description,source) VALUES (?,?,?,?,?,?)').run('datajud',id,'datajud','2099-01-01T12:00:00Z','DataJud sintético','datajud');
+  db.prepare("UPDATE processes SET last_source='datajud',initialized=1,checked_at='2099-01-04T12:00:00Z' WHERE id=?").run(id);
+  const list=await(await request(env,'/api/processes')).json();assert.equal(list[0].latest_movement,'DataJud sintético');
+  const active=await(await request(env,`/api/processes/${id}/movements`)).json();assert.equal(active.items.length,1);assert.equal(active.source,'datajud');
+  const archived=await(await request(env,`/api/processes/${id}/movements?source=direct`)).json();assert.equal(archived.items[0].description,'Direto sintético');
+  assert.equal((await request(env,`/api/processes/${id}/movements?source=unknown`)).status,400);
+  const disabled=await(await request({...env,DATAJUD_ENABLED:'false'},'/api/session')).json();
+  assert.equal(disabled.courts.find(c=>c.id==='trt6').instances[0].configured,false);
+ }finally{db.close();}
 });
 
 test('locality migration preserves existing processes, histories, notifications and read markers', () => {

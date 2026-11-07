@@ -6,6 +6,8 @@ export interface Env {
   APP_ORIGIN: string;
   CHECK_INTERVAL_MINUTES?: string;
   COURT_CONNECTORS?: string;
+  DATAJUD_ENABLED?: string;
+  DATAJUD_API_KEY?: string;
   LOCAL_DEV?: string;
 }
 
@@ -14,4 +16,5 @@ export interface ProcessRow {
   active: number; initialized: number; checked_at: string | null;
   source_updated_at: string | null; last_error: string | null;
   lease_token: string | null;
+  last_source: 'direct' | 'datajud';
 }

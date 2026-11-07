@@ -17,7 +17,7 @@ export function deploymentConfig(base, env) {
   // Preserve runtime values managed in the Cloudflare dashboard when builds do not supply them.
   config.keep_vars = true;
   config.vars = Object.fromEntries(Object.entries(config.vars || {}).filter(([key, value]) => key !== 'LOCAL_DEV' && value !== ''));
-  for (const key of ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'APP_ORIGIN', 'CHECK_INTERVAL_MINUTES']) {
+  for (const key of ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'APP_ORIGIN', 'CHECK_INTERVAL_MINUTES', 'DATAJUD_ENABLED']) {
     if (env[key]?.trim()) config.vars[key] = env[key].trim();
   }
   if (config.vars.ACCESS_TEAM_DOMAIN && !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(config.vars.ACCESS_TEAM_DOMAIN)) {
